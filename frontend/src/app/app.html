@@ -264,6 +264,7 @@
           <div class="ag-theme-quartz header-table-wrap">
             <ag-grid-angular
               [theme]="'legacy'"
+              [popupParent]="popupParent"
               [columnDefs]="headerColumnDefs()"
               [rowData]="headerGridRows()"
               [animateRows]="true"
@@ -298,6 +299,7 @@
           <div class="ag-theme-quartz table-wrap">
             <ag-grid-angular
               [theme]="'legacy'"
+              [popupParent]="popupParent"
               [columnDefs]="detailColumnDefs()"
               [rowData]="detailGridRows()"
               [getRowId]="getDetailRowId"

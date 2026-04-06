@@ -55,6 +55,80 @@ class StateHybridCellEditor implements ICellEditorComp {
   }
 }
 
+class LargeListCellEditor implements ICellEditorComp {
+  private eContainer!: HTMLDivElement;
+  private eSelect!: HTMLSelectElement;
+
+  init(params: ICellEditorParams<Record<string, unknown>, string> & { values?: string[] }): void {
+    const values = Array.isArray(params.values) ? params.values : [];
+
+    this.eContainer = document.createElement('div');
+    this.eContainer.style.minWidth = '18rem';
+    this.eContainer.style.maxWidth = '28rem';
+    this.eContainer.style.background = '#fff';
+    this.eContainer.style.border = '1px solid #9dc0d2';
+    this.eContainer.style.borderRadius = '0.35rem';
+    this.eContainer.style.boxShadow = '0 8px 20px rgba(0, 35, 47, 0.2)';
+    this.eContainer.style.padding = '0.2rem';
+
+    this.eSelect = document.createElement('select');
+    this.eSelect.style.width = '100%';
+    this.eSelect.style.minWidth = '17.5rem';
+    this.eSelect.style.border = 'none';
+    this.eSelect.style.outline = 'none';
+    this.eSelect.style.background = '#fff';
+    this.eSelect.style.fontSize = '0.95rem';
+    this.eSelect.style.lineHeight = '1.35';
+    this.eSelect.style.padding = '0.25rem';
+
+    const visibleRows = Math.min(Math.max(values.length, 4), 10);
+    this.eSelect.size = visibleRows;
+
+    values.forEach((value) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.text = value;
+      this.eSelect.appendChild(option);
+    });
+
+    const currentValue = params.value ?? '';
+    if (currentValue.length > 0) {
+      this.eSelect.value = currentValue;
+      if (this.eSelect.value !== currentValue) {
+        const option = document.createElement('option');
+        option.value = currentValue;
+        option.text = currentValue;
+        this.eSelect.insertBefore(option, this.eSelect.firstChild);
+        this.eSelect.value = currentValue;
+      }
+    }
+
+    this.eSelect.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.stopPropagation();
+      }
+    });
+
+    this.eSelect.addEventListener('dblclick', () => {
+      params.stopEditing();
+    });
+
+    this.eContainer.appendChild(this.eSelect);
+  }
+
+  getGui(): HTMLElement {
+    return this.eContainer;
+  }
+
+  afterGuiAttached(): void {
+    this.eSelect.focus();
+  }
+
+  getValue(): string {
+    return this.eSelect.value;
+  }
+}
+
 @Component({
   selector: 'app-root',
   imports: [CommonModule, FormsModule, AgGridAngular, QueryPageComponent],
@@ -167,6 +241,7 @@ export class App {
 
   readonly status = signal<string>('Ready');
   readonly isLoadingOverlayVisible = computed(() => this.status().trim().toLowerCase().startsWith('loading'));
+  readonly popupParent: HTMLElement = document.body;
   readonly loadingOverlayMessage = computed(() => {
     const text = this.status().trim();
     return text.length > 0 ? text : 'Loading data...';
@@ -320,14 +395,18 @@ export class App {
 
       const fieldOptions = this.getPermissibleValuesForField(field);
       if ((field.type === 'Select' || field.type === 'Lookup') && fieldOptions.length > 0) {
-        column.cellEditor = 'agSelectCellEditor';
+        column.cellEditor = LargeListCellEditor;
+        column.cellEditorPopup = true;
+        column.cellEditorPopupPosition = 'under';
         column.cellEditorParams = {
           values: fieldOptions
         };
       }
 
       if (field.type === 'Boolean') {
-        column.cellEditor = 'agSelectCellEditor';
+        column.cellEditor = LargeListCellEditor;
+        column.cellEditorPopup = true;
+        column.cellEditorPopupPosition = 'under';
         column.cellEditorParams = {
           values: ['true', 'false']
         };
@@ -366,14 +445,18 @@ export class App {
 
       const fieldOptions = this.getPermissibleValuesForField(field);
       if ((field.type === 'Select' || field.type === 'Lookup') && fieldOptions.length > 0) {
-        column.cellEditor = 'agSelectCellEditor';
+        column.cellEditor = LargeListCellEditor;
+        column.cellEditorPopup = true;
+        column.cellEditorPopupPosition = 'under';
         column.cellEditorParams = {
           values: fieldOptions
         };
       }
 
       if (field.type === 'Boolean') {
-        column.cellEditor = 'agSelectCellEditor';
+        column.cellEditor = LargeListCellEditor;
+        column.cellEditorPopup = true;
+        column.cellEditorPopupPosition = 'under';
         column.cellEditorParams = {
           values: ['true', 'false']
         };
@@ -502,7 +585,8 @@ export class App {
       return;
     }
 
-    const nameInput = globalThis.prompt('New dataset name:', key);
+    const defaultName = this.toPascalCaseFromKey(key);
+    const nameInput = globalThis.prompt('New dataset name:', defaultName);
     if (!nameInput) {
       return;
     }
@@ -1104,14 +1188,46 @@ export class App {
   }
 
   private parseCsv(csvText: string): string[][] {
+    const delimiter = this.detectDelimitedTextSeparator(csvText);
+    return this.parseDelimitedText(csvText, delimiter);
+  }
+
+  private detectDelimitedTextSeparator(text: string): ',' | '\t' | ';' {
+    const lines = text
+      .split(/\r\n|\n|\r/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .slice(0, 5);
+
+    if (lines.length === 0) {
+      return ',';
+    }
+
+    const sample = lines.join('\n');
+    const tabCount = (sample.match(/\t/g) ?? []).length;
+    const commaCount = (sample.match(/,/g) ?? []).length;
+    const semicolonCount = (sample.match(/;/g) ?? []).length;
+
+    if (tabCount > 0 && tabCount >= commaCount && tabCount >= semicolonCount) {
+      return '\t';
+    }
+
+    if (semicolonCount > commaCount) {
+      return ';';
+    }
+
+    return ',';
+  }
+
+  private parseDelimitedText(text: string, delimiter: ',' | '\t' | ';'): string[][] {
     const rows: string[][] = [];
     let row: string[] = [];
     let value = '';
     let inQuotes = false;
 
-    for (let i = 0; i < csvText.length; i += 1) {
-      const ch = csvText[i];
-      const next = csvText[i + 1];
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text[i];
+      const next = text[i + 1];
 
       if (ch === '"') {
         if (inQuotes && next === '"') {
@@ -1123,7 +1239,7 @@ export class App {
         continue;
       }
 
-      if (!inQuotes && ch === ',') {
+      if (!inQuotes && ch === delimiter) {
         row.push(value);
         value = '';
         continue;
@@ -2102,6 +2218,14 @@ export class App {
 
   private todayDate(): string {
     return new Date().toISOString().slice(0, 10);
+  }
+
+  private toPascalCaseFromKey(key: string): string {
+    return key
+      .split(/[^A-Z0-9]+/)
+      .filter((part) => part.length > 0)
+      .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
+      .join('');
   }
 
   private buildNewSchemaTemplate(key: string, name: string): DatasetSchema {
