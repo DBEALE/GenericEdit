@@ -1,0 +1,9 @@
+{
+  "watch": {
+    "exclude": [
+      "data/**",
+      "bin/**",
+      "obj/**"
+    ]
+  }
+}

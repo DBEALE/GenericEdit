@@ -1,0 +1,66 @@
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+*.temp
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+
+# ---- Logs ----
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Local runtime/process files ----
+.dev-processes.json
+apiDiag.log
+*.pid
+
+# ---- .NET / C# build outputs ----
+**/bin/
+**/obj/
+**/TestResults/
+**/*.user
+**/*.suo
+**/*.userosscache
+**/*.rsuser
+**/*.sln.docstates
+
+# ---- NuGet ----
+**/packages/
+*.nupkg
+*.snupkg
+
+# ---- Angular / Node ----
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+frontend/coverage/
+frontend/.cache/
+frontend/.sass-cache/
+frontend/.eslintcache
+
+# ---- Environment / secrets ----
+.env
+.env.*
+*.local
+backend/src/DatasetPlatform.Api/appsettings.Local.json
+frontend/public/runtime-config.local.js
+
+# ---- Data / storage (local dev content) ----
+data/
+backend/src/DatasetPlatform.Api/data/
+backend/src/DatasetPlatform.Api/storage/
+
+# ---- Misc archives ----
+*.zip
+*.tar
+*.gz
+*.7z
+*.rar

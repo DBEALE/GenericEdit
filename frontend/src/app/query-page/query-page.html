@@ -1,0 +1,206 @@
+<div class="query-page">
+  <div class="criteria-card">
+    <h3 class="criteria-title">API Query Playground</h3>
+
+    <section class="api-methods-block">
+      <div class="api-block-header">
+        <h4 class="api-block-title">Available API Methods (Reference)</h4>
+        <button type="button" class="api-collapse-btn" (click)="apiMethodsCollapsed.set(!apiMethodsCollapsed())">
+          {{ apiMethodsCollapsed() ? 'Show' : 'Hide' }}
+        </button>
+      </div>
+      @if (!apiMethodsCollapsed()) {
+        <table class="api-methods-table">
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>HTTP</th>
+              <th>Route</th>
+              <th>Parameters</th>
+              <th>Used For</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (method of apiMethods(); track method.name + method.route) {
+              <tr
+                [class.api-method-selected]="activeMethodTab() === method.name"
+                [class.api-method-called]="isMethodHighlighted(method.name)">
+                <td>
+                  <button
+                    type="button"
+                    class="method-link"
+                    [class.method-link-active]="activeMethodTab() === method.name"
+                    [attr.aria-pressed]="activeMethodTab() === method.name"
+                    (click)="onMethodNameClick(method.name)">
+                    {{ method.name }}
+                  </button>
+                  @if (isMethodHighlighted(method.name)) {
+                    <span class="called-badge">Called now</span>
+                  }
+                </td>
+                <td><span class="http-pill">{{ method.httpMethod }}</span></td>
+                <td>{{ method.route }}</td>
+                <td>{{ method.parameters }}</td>
+                <td>{{ method.purpose }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    </section>
+
+    <div class="criteria-row">
+      <div class="field-group">
+        <label class="field-label">Dataset</label>
+        <select class="field-input" [ngModel]="selectedSchemaKey()" (ngModelChange)="onSchemaKeyChange($event)">
+          <option value="">— Select a dataset —</option>
+          @for (schema of schemas; track schema.key) {
+            <option [value]="schema.key">{{ schema.name }} ({{ schema.key }})</option>
+          }
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label">As Of Date</label>
+        <input type="date" class="field-input" [ngModel]="asOfDate()" (ngModelChange)="asOfDate.set($event)" />
+      </div>
+      @if (activeMethodTab() === 'getInstances' || activeMethodTab() === 'getHeaders') {
+        <div class="field-group">
+          <label class="field-label">Min As Of Date</label>
+          <input type="date" class="field-input" [ngModel]="minAsOfDate()" (ngModelChange)="minAsOfDate.set($event)" />
+        </div>
+        <div class="field-group">
+          <label class="field-label">Max As Of Date</label>
+          <input type="date" class="field-input" [ngModel]="maxAsOfDate()" (ngModelChange)="maxAsOfDate.set($event)" />
+        </div>
+      }
+      <div class="field-group">
+        <label class="field-label">State</label>
+        <input type="text" class="field-input" [ngModel]="stateFilter()" (ngModelChange)="stateFilter.set($event)" placeholder="Draft / Pending Approval / Official" />
+      </div>
+      <div class="field-group">
+        <label class="field-label">Instance ID</label>
+        <input type="text" class="field-input" [ngModel]="instanceId()" (ngModelChange)="instanceId.set($event)" placeholder="Guid" />
+      </div>
+    </div>
+
+    @if (activeMethodTab() === 'getInstances' || activeMethodTab() === 'getLatestInstance' || activeMethodTab() === 'getHeaders') {
+      <div class="field-group field-group-wide">
+        @if (selectedSchemaHeaderFields().length > 0) {
+          <div class="header-criteria-prompt">
+            <div class="header-criteria-title">Header Criteria Fields</div>
+            <div class="header-criteria-subtitle">Select or enter values for dataset header fields before running the API call.</div>
+            <div class="header-criteria-grid">
+              @for (field of selectedSchemaHeaderFields(); track field.name) {
+                <div class="field-group">
+                  <label class="field-label">{{ field.label || field.name }}</label>
+                  @if (isHeaderFieldSelect(field)) {
+                    <select
+                      class="field-input"
+                      [disabled]="isLookupHeaderFieldLoading(field)"
+                      [ngModel]="getHeaderCriteriaValue(field.name)"
+                      (ngModelChange)="onHeaderCriteriaFieldChange(field.name, $event)">
+                      <option value="">— Any —</option>
+                      @if (isLookupHeaderFieldLoading(field)) {
+                        <option value="">Loading lookup values…</option>
+                      }
+                      @for (optionValue of getHeaderFieldOptions(field); track optionValue) {
+                        <option [value]="optionValue">{{ optionValue }}</option>
+                      }
+                    </select>
+                  } @else {
+                    <input
+                      type="text"
+                      class="field-input"
+                      [ngModel]="getHeaderCriteriaValue(field.name)"
+                      (ngModelChange)="onHeaderCriteriaFieldChange(field.name, $event)"
+                      [placeholder]="'Any ' + (field.label || field.name)" />
+                  }
+                </div>
+              }
+            </div>
+          </div>
+        }
+
+        <label class="field-label">Header Criteria JSON</label>
+        <textarea class="field-textarea" rows="5" [ngModel]="headerCriteriaJson()" (ngModelChange)="headerCriteriaJson.set($event)"></textarea>
+        <div class="latest-up-hint">
+          <div class="latest-up-hint-title">Latest behavior</div>
+          <div class="latest-up-hint-text">
+            getLatestInstance returns the latest up to the As Of Date for the selected state and header criteria.
+          </div>
+        </div>
+      </div>
+    }
+
+    @if (activeMethodTab() === 'getLatestInstance' || activeMethodTab() === 'getInstances' || activeMethodTab() === 'getHeaders') {
+      <div class="field-group">
+        <label class="checkbox-inline"><input type="checkbox" [ngModel]="includeInternalInfo()" (ngModelChange)="includeInternalInfo.set($event)" />Include internal info</label>
+      </div>
+    }
+
+    @if (activeMethodTab() === 'upsertSchema') {
+      <div class="field-group field-group-wide">
+        <label class="field-label">Schema Payload JSON</label>
+        <textarea class="field-textarea" rows="12" [ngModel]="schemaPayloadJson()" (ngModelChange)="schemaPayloadJson.set($event)"></textarea>
+      </div>
+    }
+
+    @if (activeMethodTab() === 'createInstance') {
+      <div class="field-group field-group-wide">
+        <label class="field-label">Create Payload JSON</label>
+        <textarea class="field-textarea" rows="12" [ngModel]="createPayloadJson()" (ngModelChange)="createPayloadJson.set($event)"></textarea>
+      </div>
+    }
+
+    @if (activeMethodTab() === 'updateInstance') {
+      <div class="field-group field-group-wide">
+        <label class="field-label">Update Payload JSON</label>
+        <textarea class="field-textarea" rows="12" [ngModel]="updatePayloadJson()" (ngModelChange)="updatePayloadJson.set($event)"></textarea>
+      </div>
+    }
+
+    @if (activeMethodTab() === 'getAudit') {
+      <div class="field-group">
+        <label class="field-label">Audit Dataset Key (optional)</label>
+        <input type="text" class="field-input" [ngModel]="auditDatasetKey()" (ngModelChange)="auditDatasetKey.set($event)" placeholder="Leave empty for all accessible datasets" />
+      </div>
+    }
+
+    <div class="criteria-actions">
+      <button type="button" class="search-btn" (click)="runActiveMethod()" [disabled]="running()">
+        {{ running() ? 'Calling API…' : 'Run API Call' }}
+      </button>
+      @if (callError()) {
+        <span class="search-error">{{ callError() }}</span>
+      }
+    </div>
+
+    <section class="api-call-block">
+      <h4 class="api-block-title">Last API Call Output</h4>
+      @if (lastSearchApiCall()) {
+        <div class="api-call-panels">
+          <div>
+            <div class="api-call-panel-header">
+              <h5 class="api-call-panel-title">Request Payload</h5>
+              <button type="button" class="api-copy-btn" (click)="copyRequestPayload()">{{ requestCopyLabel() }}</button>
+            </div>
+            <pre class="api-call-json">{{ lastSearchApiCallJson() }}</pre>
+          </div>
+          <div>
+            <div class="api-call-panel-header">
+              <h5 class="api-call-panel-title">Returned Payload</h5>
+              <button type="button" class="api-copy-btn" (click)="copyResponsePayload()">{{ responseCopyLabel() }}</button>
+            </div>
+            @if (lastSearchApiResponseJson()) {
+              <pre class="api-call-json">{{ lastSearchApiResponseJson() }}</pre>
+            } @else {
+              <div class="api-call-empty">No payload returned yet.</div>
+            }
+          </div>
+        </div>
+      } @else {
+        <div class="api-call-empty">Run any API method to capture request and response.</div>
+      }
+    </section>
+  </div>
+</div>

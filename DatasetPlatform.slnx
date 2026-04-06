@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/backend/" />
+  <Folder Name="/backend/src/">
+    <Project Path="backend/src/DatasetPlatform.Api/DatasetPlatform.Api.csproj" />
+    <Project Path="backend/src/DatasetPlatform.Application/DatasetPlatform.Application.csproj" />
+    <Project Path="backend/src/DatasetPlatform.Domain/DatasetPlatform.Domain.csproj" />
+  </Folder>
+  <Folder Name="/backend/tests/">
+    <Project Path="backend/tests/DatasetPlatform.Api.Tests/DatasetPlatform.Api.Tests.csproj" />
+  </Folder>
+</Solution>

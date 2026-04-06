@@ -1,0 +1,48 @@
+I am looking to build a general UI that will allow users to edit a dataset.
+
+
+physical components to build:
+	Repository Service
+	UI
+
+UI User roles:
+	Read - user can only view data
+	Write - user can view, edit and create data
+	signoff - user can change the state of the dataset to official
+	DatasetAdmin - allow a user to create/edit/delete a dataset schema
+
+Data:
+	Datasets will consist of a single header and multiple detail rows
+	All dataset headers will contain an asofdate and state
+	Each dataset will have a predefined schema that defines the header and detail fields including all meta-data needed to provide rich UI experience
+	Each dataset will have specific read/write and signoff access
+	New Data will be assigned a state, but only the official state can be set by an approver
+	Datasets will be based on asofdate, meaning for any date and state the latest version of the dataset can be obtained
+
+UI:
+	The user experience should be similar to editing data in excel, however the schema will allow better editing /selection /validation
+	Ensure the UI experience is professional and feature rich, schemas should be validated and easy to maintain by users
+	User will see all the datasets they have access to
+	User can add new instances of a dataset for a given asofdate and state (not official)
+	User can signoff a dataset instance, granting it official status
+	User can edit a dataset instance provided they have dataset schema write access
+	User can maintain Dataset schemas if the user has this role
+
+Repository /API
+	This component will provide the data to the UI via and API
+	It will also provide the same data to applications
+	API will allow dataset permissions to be maintained
+	The physical storage should be pluggable. Initial implementation will be covered files in a folder but we need to easily swap out for s3 or posgress.
+	API will allow new dataset schemas to be defined
+
+General:
+	All code must be robust and suitable for deployment in a production banking environment
+	All dataset changes must be audited
+	All code must be covered by unit tests
+
+Technology
+	The repository will be built as a c# .net webservice
+	The UI should be angular using whatever UI components that would provide the best user experience
+
+
+

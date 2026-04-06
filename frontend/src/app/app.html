@@ -1,0 +1,547 @@
+<div class="page-shell">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Dataset Operations Studio</p>
+    </div>
+    <div class="identity-card">
+      <div class="identity-card-header">
+        <strong>User simulation</strong>
+        <button type="button" class="toggle-btn" (click)="toggleUserSimulation()">
+          {{ userSimulationCollapsed() ? 'Show' : 'Hide' }}
+        </button>
+      </div>
+      @if (!userSimulationCollapsed()) {
+        <label>User</label>
+        <input [ngModel]="userId()" (ngModelChange)="userId.set($event)" />
+        <label>Roles (comma-separated)</label>
+        <input [ngModel]="roleInput()" (ngModelChange)="roleInput.set($event)" />
+        <button type="button" (click)="loadSchemas()">Refresh Access</button>
+        <div class="simulation-presets">
+          @for (preset of userSimulationPresets; track preset.label) {
+            <button type="button" class="simulation-preset-btn" (click)="applyUserSimulationPreset(preset)">
+              {{ preset.label }}
+            </button>
+          }
+        </div>
+      }
+    </div>
+  </header>
+
+  <nav class="page-nav">
+    <button type="button" class="nav-tab" [class.active-nav]="currentPage() === 'editor'" (click)="currentPage.set('editor')">Dataset Editor</button>
+    <button type="button" class="nav-tab" [class.active-nav]="currentPage() === 'query'" (click)="currentPage.set('query')">API Query</button>
+  </nav>
+
+  <main class="grid-layout" [class.page-hidden]="currentPage() !== 'editor'">
+    <aside class="panel catalog">
+      <h2>Dataset Catalog</h2>
+      <button type="button" class="catalog-create-btn" (click)="createNewDataset()" [disabled]="!canCreateSchema()">+ New Dataset</button>
+      <div class="catalog-search-wrap">
+        <input
+          type="text"
+          class="catalog-search"
+          placeholder="Search datasets..."
+          [ngModel]="datasetSearch()"
+          (ngModelChange)="datasetSearch.set($event)" />
+        @if (datasetSearch()) {
+          <button type="button" class="catalog-search-clear" (click)="datasetSearch.set('')" title="Clear search">✕</button>
+        }
+      </div>
+      <div class="dataset-list">
+        @for (schema of filteredSchemas(); track schema.key) {
+          <div class="dataset-entry">
+            <button
+              type="button"
+              class="dataset-item"
+              [class.active]="selectedSchemaKey() === schema.key"
+              (click)="selectSchema(schema.key)">
+              <strong>{{ schema.name }}</strong>
+              <span>{{ schema.key }}</span>
+            </button>
+            @if (canManageSchema(schema)) {
+              <button
+                type="button"
+                class="danger icon-delete-btn catalog-delete-btn"
+                aria-label="Delete dataset"
+                title="Delete dataset"
+                (click)="deleteDatasetSchema(schema.key, $event)">✕</button>
+            }
+          </div>
+        }
+        @if (filteredSchemas().length === 0) {
+          <div class="empty-instance">No matching datasets found.</div>
+        }
+      </div>
+    </aside>
+
+    <section class="panel editor">
+      <div class="workspace-heading">
+        <h2>Dataset Workspace<span *ngIf="selectedSchema() as schema"> - {{ schema.name }}</span></h2>
+        @if (selectedSchema()) {
+          <div class="role-pills">
+            @for (role of grantedDatasetRoles(); track role) {
+              <span class="pill">{{ role }}</span>
+            }
+            @if (grantedDatasetRoles().length === 0) {
+              <span class="pill muted">No dataset-level roles granted</span>
+            }
+          </div>
+        }
+      </div>
+      @if (selectedSchema(); as schema) {
+
+        <div class="tab-row">
+          <button type="button" class="tab" [class.active-tab]="activeTab() === 'editor'" (click)="activeTab.set('editor')">Data Editor</button>
+          @if (canEditSchema()) {
+            <button type="button" class="tab" [class.active-tab]="activeTab() === 'schema'" (click)="openSchemaEditorTab()">Schema Editor</button>
+          }
+          <button type="button" class="tab" [class.active-tab]="activeTab() === 'audit'" (click)="activateAuditTab()">Audit Trail</button>
+        </div>
+
+        @if (activeTab() === 'editor') {
+        <div class="section-heading-row">
+          <h3>
+            Saved Headers
+            <span class="row-count">{{ sortedInstances().length }} rows</span>
+            @if (hasInstanceFilters()) {
+              <span class="instance-filter-inline">{{ instancesHiddenCount() }} hidden</span>
+            }
+          </h3>
+          <div class="saved-headers-actions">
+            <button type="button" (click)="startNewHeaderDraft()" [disabled]="!canWriteData()">New Header</button>
+          </div>
+        </div>
+        <div class="saved-header-date-filters">
+          <label>
+            Helper Range
+            <select
+              class="field-input"
+              [ngModel]="instanceDatePreset()"
+              (ngModelChange)="applySavedHeaderDatePreset($event)">
+              @for (preset of savedHeaderDatePresets; track preset) {
+                <option [value]="preset">{{ preset }}</option>
+              }
+            </select>
+          </label>
+          <label>
+            Min As Of Date
+            <input
+              type="date"
+              class="field-input"
+              [ngModel]="instanceFilterAsOfDateMinDraft()"
+              (ngModelChange)="instanceFilterAsOfDateMinDraft.set($event)" />
+          </label>
+          <label>
+            Max As Of Date
+            <input
+              type="date"
+              class="field-input"
+              [ngModel]="instanceFilterAsOfDateMaxDraft()"
+              (ngModelChange)="instanceFilterAsOfDateMaxDraft.set($event)" />
+          </label>
+          @if (hasInstanceFilters()) {
+            <button type="button" class="clear-filters-btn" (click)="clearInstanceFilters()" title="Clear all filters">✕ Clear</button>
+          }
+          <button type="button" class="saved-header-search-btn" (click)="runSavedHeaderSearch()">Search</button>
+        </div>
+        <div class="instance-header-grid-wrap">
+          @if (datasetInstances().length > 0) {
+            <table class="instance-header-grid">
+              <thead>
+                <tr>
+                  <th class="sortable-col" (click)="sortInstances('asOfDate')">As Of {{ instanceSortCol() === 'asOfDate' ? (instanceSortDir() === 'asc' ? '▲' : '▼') : '⇅' }}</th>
+                  <th class="sortable-col" (click)="sortInstances('state')">State {{ instanceSortCol() === 'state' ? (instanceSortDir() === 'asc' ? '▲' : '▼') : '⇅' }}</th>
+                  <th class="sortable-col" (click)="sortInstances('version')">Version {{ instanceSortCol() === 'version' ? (instanceSortDir() === 'asc' ? '▲' : '▼') : '⇅' }}</th>
+                  <th>Created</th>
+                  <th>Last Changed</th>
+                  <th>Last Changed By</th>
+                  <th>Header Values</th>
+                  <th>Actions</th>
+                </tr>
+                <tr class="filter-row">
+                  <th>
+                    <div class="col-filter-wrap" (click)="$event.stopPropagation()">
+                      <input class="col-filter" type="text" placeholder="Filter…"
+                        [ngModel]="instanceFilterAsOfDate()"
+                        (ngModelChange)="instanceFilterAsOfDate.set($event)"
+                        (click)="$event.stopPropagation()" />
+                      @if (instanceFilterAsOfDate()) {
+                        <button type="button" class="col-filter-clear" title="Clear filter" (click)="instanceFilterAsOfDate.set('')">✕</button>
+                      }
+                    </div>
+                  </th>
+                  <th>
+                    <div class="col-filter-wrap" (click)="$event.stopPropagation()">
+                      <input class="col-filter" type="text" list="saved-state-opts" placeholder="Filter…"
+                        [ngModel]="instanceFilterState()"
+                        (ngModelChange)="instanceFilterState.set($event)"
+                        (click)="$event.stopPropagation()" />
+                      @if (instanceFilterState()) {
+                        <button type="button" class="col-filter-clear" title="Clear filter" (click)="instanceFilterState.set('')">✕</button>
+                      }
+                    </div>
+                    <datalist id="saved-state-opts">
+                      <option value="Draft"></option>
+                      <option value="Pending Approval"></option>
+                      <option value="Scenario Testing"></option>
+                      <option value="Official"></option>
+                    </datalist>
+                  </th>
+                  <th></th>
+                  <th></th>
+                  <th></th>
+                  <th></th>
+                  <th>
+                    <div class="col-filter-wrap" (click)="$event.stopPropagation()">
+                      <input class="col-filter" type="text" placeholder="Filter…"
+                        [ngModel]="instanceFilterHeader()"
+                        (ngModelChange)="instanceFilterHeader.set($event)"
+                        (click)="$event.stopPropagation()" />
+                      @if (instanceFilterHeader()) {
+                        <button type="button" class="col-filter-clear" title="Clear filter" (click)="instanceFilterHeader.set('')">✕</button>
+                      }
+                    </div>
+                  </th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (instance of sortedInstances(); track instance.id) {
+                  <tr [class.active-instance-row]="selectedInstanceId() === instance.id" (click)="loadInstanceIntoEditor(instance)">
+                    <td>{{ instance.asOfDate }}</td>
+                    <td>{{ instance.state }}</td>
+                    <td>v{{ instance.version }}</td>
+                    <td>{{ instance.createdAtUtc ? (instance.createdAtUtc | date:'yyyy-MM-dd HH:mm:ss') : '-' }}</td>
+                    <td>{{ instance.lastModifiedAtUtc | date:'yyyy-MM-dd HH:mm:ss' }}</td>
+                    <td>{{ instance.lastModifiedBy }}</td>
+                    <td>
+                      @for (entry of instance.header | keyvalue; track entry.key) {
+                        <span class="header-chip">{{ entry.key }}: {{ entry.value }}</span>
+                      }
+                    </td>
+                    <td>
+                      <button type="button" class="danger icon-delete-btn saved-header-delete-btn" (click)="deleteInstanceHeader(instance, $event)" [disabled]="!canWriteData()" title="Delete header" aria-label="Delete header">✕</button>
+                    </td>
+                  </tr>
+                }
+                @if (sortedInstances().length === 0) {
+                  <tr><td colspan="8" class="empty-instance">No records match the current filters.</td></tr>
+                }
+              </tbody>
+            </table>
+          } @else {
+            <div class="empty-instance">No saved headers yet for this dataset.</div>
+          }
+        </div>
+
+        @if (isEditorFormVisible()) {
+          @if (shouldShowValidation()) {
+            <div class="validation-panel">
+              <strong>Validation issues</strong>
+              <ul>
+                @for (message of validationMessages(); track message) {
+                  <li>{{ message }}</li>
+                }
+              </ul>
+            </div>
+          }
+
+          <div class="section-divider" aria-hidden="true"></div>
+
+          <div class="section-heading-row">
+            <h3>
+              Header
+              @if (hasHeaderChanges()) {
+                <span class="unsaved-indicator" title="Unsaved header changes" aria-label="Unsaved header changes">*</span>
+              }
+            </h3>
+            <div class="toolbar section-actions">
+              <button type="button" (click)="saveData()" [disabled]="!canWriteData() || !hasEditorChanges()">{{ saveActionLabel() }}</button>
+              <button type="button" (click)="saveAsCopy()" [disabled]="!canWriteData() || !hasHeaderChanges()">Save Copy</button>
+              <button type="button" (click)="signoff()" [disabled]="!canSignoff() || !currentInstance() || state().trim().toLowerCase() === 'official'">Signoff</button>
+            </div>
+          </div>
+          <div class="ag-theme-quartz header-table-wrap">
+            <ag-grid-angular
+              [theme]="'legacy'"
+              [columnDefs]="headerColumnDefs()"
+              [rowData]="headerGridRows()"
+              [animateRows]="true"
+              [stopEditingWhenCellsLoseFocus]="true"
+              (gridReady)="onHeaderGridReady($event)"
+              (cellValueChanged)="onHeaderGridCellValueChanged()">
+            </ag-grid-angular>
+          </div>
+
+          <div class="section-heading-row">
+            <h3>
+              Detail Rows
+              <span class="row-count">{{ detailGridRows().length }} rows</span>
+              @if (hasDetailChanges()) {
+                <span class="unsaved-indicator" title="Unsaved detail row changes" aria-label="Unsaved detail row changes">*</span>
+              }
+            </h3>
+            <div class="grid-toolbar section-actions">
+              <button type="button" class="add-row" (click)="addRow()" [disabled]="!canWriteData()">+ Add Row</button>
+              <button type="button" class="danger" (click)="deleteAllDetailRows()" [disabled]="!canWriteData() || detailGridRows().length === 0">Delete All Rows</button>
+              <button type="button" (click)="copyDetailRowsAsCsv()">Copy CSV</button>
+              <button type="button" (click)="importCsvFromClipboard()" [disabled]="!canWriteData()">Paste CSV</button>
+              <button type="button" (click)="csvFileInput.click()" [disabled]="!canWriteData()">Upload CSV</button>
+              <input
+                #csvFileInput
+                type="file"
+                accept=".csv,text/csv"
+                class="csv-file-input"
+                (change)="importCsvFile($event)" />
+            </div>
+          </div>
+          <div class="ag-theme-quartz table-wrap">
+            <ag-grid-angular
+              [theme]="'legacy'"
+              [columnDefs]="detailColumnDefs()"
+              [rowData]="detailGridRows()"
+              [getRowId]="getDetailRowId"
+              [animateRows]="true"
+              [stopEditingWhenCellsLoseFocus]="true"
+              (gridReady)="onGridReady($event)"
+              (cellValueChanged)="onGridCellValueChanged()">
+            </ag-grid-angular>
+          </div>
+        } @else {
+          <div class="empty-instance">Select a saved header above or click New Header to begin editing.</div>
+        }
+        } @else if (activeTab() === 'schema') {
+          <div class="schema-editor-pane">
+            <p>Build schema with controls or edit raw JSON. Both stay in sync.</p>
+            <div class="schema-builder-grid" *ngIf="schemaBuilderDraft() as draft">
+              <section class="schema-builder-panel">
+                <h4>Dataset</h4>
+                <label>Key</label>
+                <input
+                  type="text"
+                  [ngModel]="draft.key"
+                  (ngModelChange)="updateSchemaMeta('key', $event)" />
+
+                <label>Name</label>
+                <input
+                  type="text"
+                  [ngModel]="draft.name"
+                  (ngModelChange)="updateSchemaMeta('name', $event)" />
+
+                <label>Description</label>
+                <textarea
+                  [ngModel]="draft.description"
+                  (ngModelChange)="updateSchemaMeta('description', $event)"></textarea>
+
+                <h4>Permissions (comma-separated roles or user IDs)</h4>
+                <label>Read Roles</label>
+                <input
+                  type="text"
+                  [ngModel]="getPermissionUsersText('readRoles')"
+                  (ngModelChange)="updatePermissionUsers('readRoles', $event)" />
+
+                <label>Write Roles</label>
+                <input
+                  type="text"
+                  [ngModel]="getPermissionUsersText('writeRoles')"
+                  (ngModelChange)="updatePermissionUsers('writeRoles', $event)" />
+
+                <label>Signoff Roles</label>
+                <input
+                  type="text"
+                  [ngModel]="getPermissionUsersText('signoffRoles')"
+                  (ngModelChange)="updatePermissionUsers('signoffRoles', $event)" />
+
+                <label>Dataset Admin Roles</label>
+                <input
+                  type="text"
+                  [ngModel]="getPermissionUsersText('datasetAdminRoles')"
+                  (ngModelChange)="updatePermissionUsers('datasetAdminRoles', $event)" />
+
+                <button type="button" (click)="saveSchemaEditor()" [disabled]="!canEditSchema() || !!schemaEditorJsonError()">Save Schema</button>
+              </section>
+
+              <section class="schema-builder-panel">
+                <div class="schema-fields-header">
+                  <h4>Header Fields</h4>
+                  <button type="button" class="mini" (click)="addSchemaField('headerFields')" [disabled]="!canEditSchema()">+ Add</button>
+                </div>
+                @for (field of draft.headerFields; track trackByFieldIndex($index)) {
+                  <div class="schema-field-card">
+                    <div class="schema-field-grid schema-field-grid-header">
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Name</span>
+                        <input type="text" [ngModel]="field.name" (ngModelChange)="updateSchemaField('headerFields', $index, 'name', $event)" />
+                      </label>
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Label</span>
+                        <input type="text" [ngModel]="field.label" (ngModelChange)="updateSchemaField('headerFields', $index, 'label', $event)" />
+                      </label>
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Type</span>
+                        <select [ngModel]="field.type" (ngModelChange)="updateSchemaField('headerFields', $index, 'type', $event)">
+                          <option value="String">String</option>
+                          <option value="Number">Number</option>
+                          <option value="Date">Date</option>
+                          <option value="Boolean">Boolean</option>
+                          <option value="Select">Select</option>
+                          <option value="Lookup">Lookup</option>
+                        </select>
+                      </label>
+                      <label class="schema-check"><input type="checkbox" [ngModel]="field.required" (ngModelChange)="updateSchemaField('headerFields', $index, 'required', $event)" /> Required</label>
+                    </div>
+                    <div class="schema-field-limits-row">
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Size</span>
+                        <input class="schema-mini-num" type="number" [ngModel]="field.maxLength ?? ''" (ngModelChange)="updateSchemaField('headerFields', $index, 'maxLength', $event)" />
+                      </label>
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Min</span>
+                        <input class="schema-mini-num" type="number" [ngModel]="field.minValue ?? ''" (ngModelChange)="updateSchemaField('headerFields', $index, 'minValue', $event)" />
+                      </label>
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Max</span>
+                        <input class="schema-mini-num" type="number" [ngModel]="field.maxValue ?? ''" (ngModelChange)="updateSchemaField('headerFields', $index, 'maxValue', $event)" />
+                      </label>
+                    </div>
+                    @if (field.type === 'Select') {
+                    <label class="schema-field-input schema-select-full">
+                      <span class="schema-field-label">Allowed Values (csv)</span>
+                      <input class="schema-select-full" type="text" [ngModel]="getFieldAllowedValuesText(field)" (ngModelChange)="updateSchemaField('headerFields', $index, 'allowedValues', $event)" />
+                    </label>
+                    }
+                    @if (field.type === 'Lookup') {
+                    <label class="schema-field-input schema-select-full">
+                      <span class="schema-field-label">Lookup Dataset</span>
+                      <input class="schema-select-full" type="text" [ngModel]="field.lookupDatasetKey ?? ''" (ngModelChange)="updateSchemaField('headerFields', $index, 'lookupDatasetKey', $event)" />
+                    </label>
+                    }
+                    <button type="button" class="danger mini" (click)="removeSchemaField('headerFields', $index)" [disabled]="!canEditSchema()">Remove</button>
+                  </div>
+                }
+
+                <div class="schema-fields-header">
+                  <h4>Detail Fields</h4>
+                  <button type="button" class="mini" (click)="addSchemaField('detailFields')" [disabled]="!canEditSchema()">+ Add</button>
+                </div>
+                @for (field of draft.detailFields; track trackByFieldIndex($index)) {
+                  <div class="schema-field-card">
+                    <div class="schema-field-grid schema-field-grid-header">
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Name</span>
+                        <input type="text" [ngModel]="field.name" (ngModelChange)="updateSchemaField('detailFields', $index, 'name', $event)" />
+                      </label>
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Label</span>
+                        <input type="text" [ngModel]="field.label" (ngModelChange)="updateSchemaField('detailFields', $index, 'label', $event)" />
+                      </label>
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Type</span>
+                        <select [ngModel]="field.type" (ngModelChange)="updateSchemaField('detailFields', $index, 'type', $event)">
+                          <option value="String">String</option>
+                          <option value="Number">Number</option>
+                          <option value="Date">Date</option>
+                          <option value="Boolean">Boolean</option>
+                          <option value="Select">Select</option>
+                          <option value="Lookup">Lookup</option>
+                        </select>
+                      </label>
+                      <div class="schema-field-checks-row">
+                        <label class="schema-check"><input type="checkbox" [ngModel]="field.required" (ngModelChange)="updateSchemaField('detailFields', $index, 'required', $event)" /> Required</label>
+                        <label class="schema-check"><input type="checkbox" [ngModel]="field.isKey" (ngModelChange)="updateSchemaField('detailFields', $index, 'isKey', $event)" /> Key Field</label>
+                      </div>
+                    </div>
+                    <div class="schema-field-limits-row">
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Size</span>
+                        <input class="schema-mini-num" type="number" [ngModel]="field.maxLength ?? ''" (ngModelChange)="updateSchemaField('detailFields', $index, 'maxLength', $event)" />
+                      </label>
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Min</span>
+                        <input class="schema-mini-num" type="number" [ngModel]="field.minValue ?? ''" (ngModelChange)="updateSchemaField('detailFields', $index, 'minValue', $event)" />
+                      </label>
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Max</span>
+                        <input class="schema-mini-num" type="number" [ngModel]="field.maxValue ?? ''" (ngModelChange)="updateSchemaField('detailFields', $index, 'maxValue', $event)" />
+                      </label>
+                    </div>
+                    @if (field.type === 'Select') {
+                    <label class="schema-field-input schema-select-full">
+                      <span class="schema-field-label">Allowed Values (csv)</span>
+                      <input class="schema-select-full" type="text" [ngModel]="getFieldAllowedValuesText(field)" (ngModelChange)="updateSchemaField('detailFields', $index, 'allowedValues', $event)" />
+                    </label>
+                    }
+                    @if (field.type === 'Lookup') {
+                    <label class="schema-field-input schema-select-full">
+                      <span class="schema-field-label">Lookup Dataset</span>
+                      <input class="schema-select-full" type="text" [ngModel]="field.lookupDatasetKey ?? ''" (ngModelChange)="updateSchemaField('detailFields', $index, 'lookupDatasetKey', $event)" />
+                    </label>
+                    }
+                    <button type="button" class="danger mini" (click)="removeSchemaField('detailFields', $index)" [disabled]="!canEditSchema()">Remove</button>
+                  </div>
+                }
+              </section>
+
+              <section class="schema-builder-panel schema-json-panel">
+                <h4>Schema JSON</h4>
+                <label>JSON Editor</label>
+                <textarea
+                  class="schema-editor-area"
+                  [ngModel]="schemaEditorJson()"
+                  (ngModelChange)="onSchemaEditorJsonChange($event)"></textarea>
+                @if (schemaEditorJsonError()) {
+                  <div class="schema-json-error">{{ schemaEditorJsonError() }}</div>
+                }
+              </section>
+            </div>
+          </div>
+        } @else {
+          <div class="audit-tab-header">
+            <p>Review audited dataset and schema changes for the current user context.</p>
+            <button type="button" (click)="loadAudit()">Refresh</button>
+          </div>
+          <div class="audit-tab-list">
+            <ul>
+              @for (event of filteredAuditEvents(); track event.id) {
+                <li>
+                  <strong>{{ event.action }}</strong> | {{ event.datasetKey }} | {{ event.userId }}
+                  <div>{{ event.occurredAtUtc }} - {{ event.details }}</div>
+                </li>
+              }
+            </ul>
+            @if (filteredAuditEvents().length === 0) {
+              <p>No audit events found for {{ selectedSchemaKey() }}.</p>
+            }
+          </div>
+        }
+      } @else {
+        <p>Select a dataset to start editing.</p>
+      }
+    </section>
+  </main>
+
+  <app-query-page
+    [class.page-hidden]="currentPage() !== 'query'"
+    [schemas]="schemas()"
+    [userId]="userId()"
+    [roles]="roles()">
+  </app-query-page>
+
+  <section class="toast-stack" aria-live="polite" aria-atomic="true">
+    @if (statusToast()) {
+      <div class="toast info-toast">{{ statusToast() }}</div>
+    }
+    @if (saveNotice()) {
+      <div class="toast success-toast">{{ saveNotice() }}</div>
+    }
+    @if (error()) {
+      <div class="toast error-toast">{{ error() }}</div>
+    }
+  </section>
+</div>
+
+@if (isLoadingOverlayVisible()) {
+  <div class="loading-overlay" role="status" aria-live="polite" aria-busy="true">
+    <div class="loading-overlay-card">{{ loadingOverlayMessage() }}</div>
+  </div>
+}

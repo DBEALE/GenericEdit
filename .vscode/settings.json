@@ -1,0 +1,8 @@
+{
+    "csharp-dev-tools.roslyn.projectOrSolutionFiles": [
+        "c:\\Users\\Admin\\Documents\\vsCode\\git\\GenericEdit\\DatasetPlatform.slnx"
+    ],
+    "chat.tools.terminal.autoApprove": {
+        ".\\start-dev.ps1": true
+    }
+}

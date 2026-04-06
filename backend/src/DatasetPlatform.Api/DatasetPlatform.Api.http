@@ -1,0 +1,41 @@
+@DatasetPlatform.Api_HostAddress = http://localhost:5201
+@UserId = writer-user
+@UserRoles = Read,Write
+@DatasetKey = FX_RATES
+@InstanceId = 00000000-0000-0000-0000-000000000000
+
+GET {{DatasetPlatform.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
+
+GET {{DatasetPlatform.Api_HostAddress}}/api/datasets/{{DatasetKey}}/headers?minAsOfDate=2026-03-01&maxAsOfDate=2026-04-01&state=Draft
+x-user-id: viewer
+x-user-roles: Read
+
+###
+GET {{DatasetPlatform.Api_HostAddress}}/api/datasets/{{DatasetKey}}/instances
+x-user-id: {{UserId}}
+x-user-roles: {{UserRoles}}
+
+###
+GET {{DatasetPlatform.Api_HostAddress}}/api/datasets/{{DatasetKey}}/instances/{{InstanceId}}
+x-user-id: viewer
+x-user-roles: Read
+Accept: application/json
+
+###
+
+GET {{DatasetPlatform.Api_HostAddress}}/api/datasets/{{DatasetKey}}/instances?minAsOfDate=2026-03-01&maxAsOfDate=2026-04-01&state=Draft
+x-user-id: {{UserId}}
+x-user-roles: {{UserRoles}}
+Accept: application/json
+
+###
+
+GET {{DatasetPlatform.Api_HostAddress}}/api/datasets/{{DatasetKey}}/instances?minAsOfDate=2026-04-01&maxAsOfDate=2026-04-01&state=Draft&headerCriteria=%7B%22book%22%3A%22LON%22%7D&includeInternalInfo=true
+x-user-id: {{UserId}}
+x-user-roles: {{UserRoles}}
+Accept: application/json
+
+###
