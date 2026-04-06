@@ -1,64 +1,52 @@
 # Frontend
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 20.3.22.
+Angular 20 standalone UI for schema management, dataset editing, and API query simulation.
 
 ## Development server
 
-To start a local development server, run:
+Start from repo root (recommended):
 
-```bash
-ng serve
+```powershell
+./start-dev.ps1
 ```
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+This launches the frontend on `http://localhost:4300`.
 
-## Code scaffolding
-
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+You can also run frontend only:
 
 ```bash
-ng generate component component-name
+npm install
+npm start -- --port 4300
 ```
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+## Build
 
 ```bash
-ng generate --help
+npm run build
 ```
 
-## Building
-
-To build the project run:
+## Unit tests
 
 ```bash
-ng build
+npm run test -- --watch=false --browsers=ChromeHeadless
 ```
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+## Current defaults
 
-## Running unit tests
+- Default simulated user: `Admin`
+- Default simulated roles: `Reader,Writer,Approver,Admin,DatasetAdmin`
+- New schema default permissions:
+	- Read roles: `Reader`
+	- Write roles: `Writer`
+	- Signoff roles: `Approver`
+	- Dataset admin roles: `Admin`
 
-To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
+## Grid and import behavior
 
-```bash
-ng test
-```
+- Select/lookup editors use large AG Grid popup editors to improve usability in compact row layouts.
+- Clipboard import supports CSV and Excel-style tab-delimited content.
 
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
-
-## Runtime UI Debug Flag
+## Runtime UI debug flag
 
 UI API debug behavior is controlled at runtime in [public/runtime-config.js](public/runtime-config.js).
 

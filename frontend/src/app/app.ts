@@ -11,6 +11,7 @@ type DetailGridRow = Record<string, unknown> & { __rowKey: string };
 type UserSimulationPreset = { label: string; userId: string; roles: string[] };
 type SavedHeaderDatePreset = 'Last month' | 'Last 3 months' | 'Last 6 months' | 'Last 1 year';
 
+// Keeps state editing flexible: free typing is allowed, with common values suggested.
 class StateHybridCellEditor implements ICellEditorComp {
   private eContainer!: HTMLDivElement;
   private eInput!: HTMLInputElement;
@@ -55,6 +56,7 @@ class StateHybridCellEditor implements ICellEditorComp {
   }
 }
 
+// Uses a larger popup list than the native agSelect editor to avoid cramped/clipped menus.
 class LargeListCellEditor implements ICellEditorComp {
   private eContainer!: HTMLDivElement;
   private eSelect!: HTMLSelectElement;
@@ -241,6 +243,7 @@ export class App {
 
   readonly status = signal<string>('Ready');
   readonly isLoadingOverlayVisible = computed(() => this.status().trim().toLowerCase().startsWith('loading'));
+  // Render AG Grid popups at document level so editors are not clipped by grid containers.
   readonly popupParent: HTMLElement = document.body;
   readonly loadingOverlayMessage = computed(() => {
     const text = this.status().trim();
@@ -1192,6 +1195,7 @@ export class App {
     return this.parseDelimitedText(csvText, delimiter);
   }
 
+  // Clipboard data can come as CSV, TSV (Excel copy), or semicolon CSV by locale.
   private detectDelimitedTextSeparator(text: string): ',' | '\t' | ';' {
     const lines = text
       .split(/\r\n|\n|\r/)

@@ -20,7 +20,9 @@ This workspace contains a production-oriented baseline for a schema-driven datas
 Headers used for role/user context in API requests:
 
 - `x-user-id`: user identifier
-- `x-user-roles`: comma-separated roles (for example: `Read,Write,Signoff,DatasetAdmin`)
+- `x-user-roles`: comma-separated roles (for example: `Reader,Writer,Approver,Admin,DatasetAdmin`)
+
+Role names are schema-configurable principals. Capability buckets remain Read/Write/Signoff/DatasetAdmin.
 
 Supported capabilities:
 
@@ -74,6 +76,7 @@ dotnet run
 ```
 
 Default API URL is shown in launch output (typically `https://localhost:7278`).
+With `start-dev.ps1`, the API runs at `http://localhost:5201`.
 
 ### Frontend
 
@@ -84,6 +87,19 @@ npm start
 ```
 
 Open the Angular URL shown in console (typically `http://localhost:4200`).
+With `start-dev.ps1`, the UI runs at `http://localhost:4300`.
+
+## Frontend Notes
+
+- New schema defaults:
+	- Read roles: `Reader`
+	- Write roles: `Writer`
+	- Signoff roles: `Approver`
+	- Dataset admin roles: `Admin`
+- Default simulated user context:
+	- User: `Admin`
+	- Roles: `Reader,Writer,Approver,Admin,DatasetAdmin`
+- Clipboard import accepts both CSV and Excel-style tab-delimited data.
 
 ## Test Instructions
 

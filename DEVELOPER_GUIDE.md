@@ -253,7 +253,7 @@ There is also a **global** `DatasetAdmin` role (the string `"DatasetAdmin"`) —
 The user's identity is passed via HTTP headers (simulated — no real authentication currently):
 
 - `x-user-id: alice` — the user's identifier
-- `x-user-roles: DatasetAdmin,Analyst` — comma-separated roles
+- `x-user-roles: Reader,Writer,Approver,Admin,DatasetAdmin` — comma-separated roles
 
 > **Security warning:** These headers are not cryptographically verified. Anyone can forge them. Before going to production, replace `RequestUserContextAccessor` with proper JWT/OIDC validation.
 
@@ -423,7 +423,7 @@ The frontend defaults to `http://localhost:5201/api`. To change it, set the glob
 
 This launches:
 - Backend: `http://localhost:5201` (or as configured)
-- Frontend: `http://localhost:4200`
+- Frontend: `http://localhost:4300`
 
 Or start them manually:
 
@@ -486,17 +486,22 @@ Angular **Signals** are used for reactive state — no Redux or NgRx. Key signal
 | Signal | What it holds |
 |---|---|
 | `selectedSchema` | The dataset the user has chosen from the list |
-| `instances` | The loaded instances for the selected schema |
-| `editingInstance` | The instance currently open in the editor |
-| `currentUser` | Simulated user identity (for demo purposes) |
+| `datasetInstances` | The loaded saved-header rows for the selected schema |
+| `currentInstance` | The currently loaded full instance in the editor |
+| `userId` / `roleInput` | Simulated user identity and role list |
 
 ### UI components
 
 - **ag-Grid** — renders the instance list and the row editor grid. Configured with inline cell editing.
+- **ag-Grid popup editors** — select/lookup editors render as document-level popups to avoid clipping in compact grid containers.
 - **Dataset catalogue** — left panel showing all accessible schemas.
 - **Header editor** — form for filling in header fields.
 - **Detail grid** — ag-Grid for editing tabular row data.
 - **Query page** (`query-page/`) — a separate tab for exploring the API via the OpenAPI spec.
+
+### Import behavior
+
+- Paste/import accepts comma-delimited CSV and tab-delimited clipboard data from Excel.
 
 ### HTTP client (`dataset-api.service.ts`)
 
