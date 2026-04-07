@@ -53,7 +53,7 @@
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
-  background: #fff;
+  background: var(--panel-soft);
   font-family: Consolas, 'Courier New', monospace;
 }
 
@@ -81,7 +81,7 @@
   color: var(--ink);
   width: 100%;
   box-sizing: border-box;
-  background: #fff;
+  background: var(--panel-soft);
 }
 
 .field-input-wrap {
@@ -99,7 +99,7 @@
   transform: translateY(-50%);
   border: none;
   background: transparent;
-  color: #6f7f88;
+  color: var(--muted);
   cursor: pointer;
   font-size: 0.75rem;
   line-height: 1;
@@ -139,64 +139,64 @@
 
 .latest-up-hint {
   margin-top: 0.45rem;
-  border: 1px solid #f4c27a;
+  border: 1px solid color-mix(in oklab, var(--warning) 55%, var(--border));
   border-radius: 0.6rem;
-  background: #fff7e8;
+  background: color-mix(in oklab, var(--warning) 14%, var(--panel));
   padding: 0.55rem 0.65rem;
   display: grid;
   gap: 0.25rem;
 }
 
 .latest-up-hint-title {
-  color: #7a3f00;
+  color: var(--warning);
   font-size: 0.78rem;
   font-weight: 700;
 }
 
 .latest-up-hint-text,
 .latest-up-hint-fields {
-  color: #6b5a40;
+  color: var(--ink);
   font-size: 0.76rem;
 }
 
 .latest-up-hint-missing {
-  color: #9b2f00;
+  color: var(--danger);
   font-size: 0.76rem;
   font-weight: 700;
 }
 
 .latest-up-template-btn {
   justify-self: start;
-  border: 1px solid #d9a758;
+  border: 1px solid color-mix(in oklab, var(--warning) 42%, var(--border));
   border-radius: 0.45rem;
-  background: #fff;
-  color: #6c440f;
+  background: var(--panel);
+  color: var(--ink);
   font-size: 0.75rem;
   font-weight: 700;
   padding: 0.22rem 0.55rem;
   cursor: pointer;
 
   &:hover {
-    background: #fff2d6;
+    background: color-mix(in oklab, var(--warning) 14%, var(--panel));
   }
 }
 
 .header-criteria-prompt {
   margin-bottom: 0.6rem;
-  border: 1px solid #c4dbe3;
+  border: 1px solid var(--border);
   border-radius: 0.65rem;
-  background: #f4fafc;
+  background: var(--panel-soft);
   padding: 0.65rem;
 }
 
 .header-criteria-title {
-  color: #194b5a;
+  color: var(--ink);
   font-size: 0.78rem;
   font-weight: 700;
 }
 
 .header-criteria-subtitle {
-  color: #587580;
+  color: var(--muted);
   font-size: 0.75rem;
   margin-top: 0.15rem;
 }
@@ -220,7 +220,7 @@
   font-weight: 700;
   font-size: 0.9rem;
   background: var(--accent);
-  color: #fff;
+  color: var(--ink-on-accent);
   border: none;
   border-radius: 0.6rem;
   cursor: pointer;
@@ -232,7 +232,7 @@
   }
 
   &:hover:not(:disabled) {
-    background: #004d5f;
+    background: color-mix(in oklab, var(--accent) 80%, black);
   }
 }
 
@@ -250,7 +250,7 @@
 .api-call-block {
   border: 1px solid var(--border);
   border-radius: 0.75rem;
-  background: #f8fcfd;
+  background: var(--panel-soft);
   padding: 0.75rem;
 }
 
@@ -272,7 +272,7 @@
 
 .api-collapse-btn {
   border: 1px solid var(--border);
-  background: #ffffff;
+  background: var(--panel);
   color: var(--muted);
   border-radius: 0.45rem;
   padding: 0.2rem 0.55rem;
@@ -281,7 +281,7 @@
 
   &:hover {
     color: var(--ink);
-    background: #f1f6f8;
+    background: var(--panel-soft);
   }
 }
 
@@ -299,7 +299,7 @@
 
   td {
     padding: 0.3rem 0.4rem;
-    border-bottom: 1px solid #e8eff2;
+    border-bottom: 1px solid var(--border);
     vertical-align: top;
   }
 
@@ -308,22 +308,22 @@
   }
 
   tbody tr.api-method-called {
-    background: #e7f7fb;
+    background: color-mix(in oklab, var(--accent-soft) 62%, var(--panel));
     animation: methodPulse 0.55s ease-out;
   }
 
   tbody tr.api-method-selected {
-    background: #dff3ff;
-    box-shadow: inset 3px 0 0 #0b6f86;
+    background: color-mix(in oklab, var(--accent-soft) 78%, var(--panel));
+    box-shadow: inset 3px 0 0 var(--accent);
   }
 }
 
 .called-badge {
   margin-left: 0.4rem;
-  border: 1px solid #ff8d2a;
+  border: 1px solid color-mix(in oklab, var(--warning) 65%, var(--border));
   border-radius: 999px;
-  background: #ffe2a8;
-  color: #7a2f00;
+  background: color-mix(in oklab, var(--warning) 30%, var(--panel));
+  color: var(--warning);
   font-size: 0.67rem;
   font-weight: 700;
   padding: 0.05rem 0.35rem;
@@ -333,7 +333,7 @@
 .method-link {
   border: none;
   background: transparent;
-  color: #0a5a6b;
+  color: var(--accent);
   font-weight: 700;
   font-size: 0.75rem;
   cursor: pointer;
@@ -342,21 +342,21 @@
   text-underline-offset: 0.14rem;
 
   &:hover {
-    color: #083f4b;
+    color: color-mix(in oklab, var(--accent) 88%, var(--ink));
   }
 }
 
 .method-link-active {
-  color: #083f4b;
+  color: var(--ink);
   text-decoration-thickness: 0.15rem;
 }
 
 @keyframes methodPulse {
   from {
-    background: #d4f1f8;
+    background: color-mix(in oklab, var(--accent-soft) 74%, var(--panel));
   }
   to {
-    background: #e7f7fb;
+    background: color-mix(in oklab, var(--accent-soft) 62%, var(--panel));
   }
 }
 
@@ -364,9 +364,9 @@
   display: inline-block;
   min-width: 3.1rem;
   text-align: center;
-  border: 1px solid #b8dfe8;
+  border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
   border-radius: 999px;
-  background: #eaf4f7;
+  background: color-mix(in oklab, var(--accent-soft) 68%, var(--panel));
   color: var(--accent);
   font-weight: 700;
   font-size: 0.7rem;
@@ -377,19 +377,19 @@
   margin: 0;
   border: 1px solid var(--border);
   border-radius: 0.55rem;
-  background: #ffffff;
+  background: var(--panel);
   padding: 0.6rem;
   font-size: 0.74rem;
   line-height: 1.4;
   max-height: 255px;
   overflow: auto;
-  color: #1e3541;
+  color: var(--ink);
 }
 
 .api-call-empty {
   border: 1px dashed var(--border);
   border-radius: 0.55rem;
-  background: #fff;
+  background: var(--panel);
   color: var(--muted);
   padding: 0.65rem;
   font-size: 0.8rem;
@@ -418,9 +418,9 @@
 }
 
 .api-copy-btn {
-  border: 1px solid #bfd7df;
-  background: #ffffff;
-  color: #34515d;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--ink);
   border-radius: 0.42rem;
   padding: 0.16rem 0.5rem;
   font-size: 0.7rem;
@@ -428,8 +428,8 @@
   cursor: pointer;
 
   &:hover {
-    background: #eef7fa;
-    color: #173f4d;
+    background: var(--panel-soft);
+    color: var(--ink);
   }
 }
 
@@ -470,7 +470,7 @@
   th {
     text-align: left;
     padding: 0.5rem 0.75rem;
-    background: #f0f4f6;
+    background: var(--panel-strong);
     color: var(--muted);
     font-weight: 600;
     text-transform: uppercase;
@@ -481,7 +481,7 @@
 
   td {
     padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid #eaeff2;
+    border-bottom: 1px solid var(--border);
     vertical-align: top;
   }
 
@@ -490,7 +490,7 @@
     transition: background 0.1s;
 
     &:hover {
-      background: #f5fafc;
+      background: color-mix(in oklab, var(--accent-soft) 45%, var(--panel));
     }
 
     &.selected-row {
@@ -505,9 +505,9 @@
 
 .header-chip {
   display: inline-block;
-  background: #eaf4f7;
+  background: color-mix(in oklab, var(--accent-soft) 68%, var(--panel));
   color: var(--accent);
-  border: 1px solid #b8dfe8;
+  border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
   border-radius: 0.4rem;
   padding: 0.1rem 0.45rem;
   font-size: 0.78rem;
@@ -561,13 +561,13 @@
   margin: 0;
   border: 1px solid var(--border);
   border-radius: 0.6rem;
-  background: #f7fbfc;
+  background: var(--panel-soft);
   padding: 0.75rem;
   font-size: 0.78rem;
   line-height: 1.45;
   max-height: 260px;
   overflow: auto;
-  color: #1e3541;
+  color: var(--ink);
 }
 
 .query-detail-grid-wrap {

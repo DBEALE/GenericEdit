@@ -177,6 +177,56 @@ public sealed class HeadersDiagnosticsLogTests
         }
     }
 
+    [Fact]
+    public async Task DiagnosticsLog_ShouldRetainOnlyConfiguredMaxRows()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "dataset-platform-it", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        var dataPath = Path.Combine(tempRoot, "data");
+        var logPath = Path.Combine(tempRoot, "apiDiag.log");
+        const int maxLogRows = 40;
+
+        await using var factory = new HeadersApiFactory(
+            dataPath,
+            logPath,
+            verbosity: ApiDiagnosticsOptions.CompactVerbosity,
+            maxLogRows: maxLogRows);
+        using var client = factory.CreateClient();
+
+        try
+        {
+            await SeedDatasetAsync(factory.Services, CancellationToken.None);
+
+            for (var i = 0; i < 8; i++)
+            {
+                using var request = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    "/api/datasets/FX_RATES/headers?minAsOfDate=2026-03-05&maxAsOfDate=2026-04-05&includeInternalInfo=true");
+                request.Headers.Add("x-user-id", "viewer");
+                request.Headers.Add("x-user-roles", "DatasetReaderRole");
+
+                var response = await client.SendAsync(request);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            }
+
+            var logText = await ReadFileWithRetryAsync(logPath, maxAttempts: 20, delayMs: 50);
+            var lines = logText
+                .Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
+                .Where(line => line.Length > 0)
+                .ToArray();
+
+            Assert.True(lines.Length <= maxLogRows, $"Expected at most {maxLogRows} rows but found {lines.Length}.");
+            Assert.Contains("GET /api/datasets/FX_RATES/headers", logText, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
+
     private static async Task SeedDatasetAsync(IServiceProvider services, CancellationToken cancellationToken)
     {
         using var scope = services.CreateScope();
@@ -320,7 +370,8 @@ public sealed class HeadersDiagnosticsLogTests
         string storagePath,
         string logPath,
         string verbosity = ApiDiagnosticsOptions.FullVerbosity,
-        bool logSearchEfficiencyStats = false) : WebApplicationFactory<Program>
+        bool logSearchEfficiencyStats = false,
+        int? maxLogRows = null) : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
         {
@@ -333,6 +384,7 @@ public sealed class HeadersDiagnosticsLogTests
                     ["Storage:BasePath"] = storagePath,
                     ["ApiDebug:Enabled"] = "true",
                     ["ApiDebug:LogFilePath"] = logPath,
+                    ["ApiDebug:MaxLogRows"] = (maxLogRows ?? 1000).ToString(),
                     ["ApiDebug:Verbosity"] = verbosity,
                     ["ApiDebug:LogSearchEfficiencyStats"] = logSearchEfficiencyStats.ToString().ToLowerInvariant()
                 });

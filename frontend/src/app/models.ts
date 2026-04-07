@@ -95,5 +95,12 @@ export interface AuditEvent {
   action: string;
   datasetKey: string;
   datasetInstanceId?: string;
-  details: string;
+  rowChanges?: AuditRowChange[];
+}
+
+export interface AuditRowChange {
+  operation: 'added' | 'removed' | 'updated' | string;
+  keyFields: Record<string, string>;
+  sourceValues?: Record<string, string>;
+  targetValues?: Record<string, string>;
 }

@@ -1,7 +1,8 @@
-<div class="page-shell">
+<div class="page-shell" [class.theme-dark]="theme() === 'dark'" [class.theme-light]="theme() === 'light'">
   <header class="hero">
-    <div>
-      <p class="eyebrow">Dataset Operations Studio</p>
+    <div class="hero-brand">
+      <p class="eyebrow">Data Repository</p>
+      <p class="hero-meta">Theme: {{ theme() === 'dark' ? 'Dark' : 'Light' }} <span>{{ userId() }}</span></p>
     </div>
     <div class="identity-card">
       <div class="identity-card-header">
@@ -30,6 +31,9 @@
   <nav class="page-nav">
     <button type="button" class="nav-tab" [class.active-nav]="currentPage() === 'editor'" (click)="currentPage.set('editor')">Dataset Editor</button>
     <button type="button" class="nav-tab" [class.active-nav]="currentPage() === 'query'" (click)="currentPage.set('query')">API Query</button>
+    <div class="theme-toggle-wrap">
+      <button type="button" class="theme-toggle-btn" (click)="toggleTheme()">Theme: {{ theme() === 'dark' ? 'Dark' : 'Light' }}</button>
+    </div>
   </nav>
 
   <main class="grid-layout" [class.page-hidden]="currentPage() !== 'editor'">
@@ -315,52 +319,60 @@
         } @else if (activeTab() === 'schema') {
           <div class="schema-editor-pane">
             <p>Build schema with controls or edit raw JSON. Both stay in sync.</p>
-            <div class="schema-builder-grid" *ngIf="schemaBuilderDraft() as draft">
-              <section class="schema-builder-panel">
-                <h4>Dataset</h4>
-                <label>Key</label>
-                <input
-                  type="text"
-                  [ngModel]="draft.key"
-                  (ngModelChange)="updateSchemaMeta('key', $event)" />
+            <div class="schema-layout" [class.json-collapsed]="schemaJsonPaneCollapsed()" *ngIf="schemaBuilderDraft() as draft">
+              <div class="schema-main-stack">
+              <section class="schema-builder-panel schema-dataset-panel">
+                <div class="schema-fields-header">
+                  <h4>Dataset</h4>
+                  <button type="button" class="mini" (click)="saveSchemaEditor()" [disabled]="!canEditSchema() || !!schemaEditorJsonError()">Save</button>
+                </div>
+                <div class="schema-dataset-grid">
+                  <div class="schema-dataset-main">
+                    <label>Key</label>
+                    <input
+                      type="text"
+                      [ngModel]="draft.key"
+                      (ngModelChange)="updateSchemaMeta('key', $event)" />
 
-                <label>Name</label>
-                <input
-                  type="text"
-                  [ngModel]="draft.name"
-                  (ngModelChange)="updateSchemaMeta('name', $event)" />
+                    <label>Name</label>
+                    <input
+                      type="text"
+                      [ngModel]="draft.name"
+                      (ngModelChange)="updateSchemaMeta('name', $event)" />
 
-                <label>Description</label>
-                <textarea
-                  [ngModel]="draft.description"
-                  (ngModelChange)="updateSchemaMeta('description', $event)"></textarea>
+                    <label>Description</label>
+                    <textarea
+                      [ngModel]="draft.description"
+                      (ngModelChange)="updateSchemaMeta('description', $event)"></textarea>
+                  </div>
 
-                <h4>Permissions (comma-separated roles or user IDs)</h4>
-                <label>Read Roles</label>
-                <input
-                  type="text"
-                  [ngModel]="getPermissionUsersText('readRoles')"
-                  (ngModelChange)="updatePermissionUsers('readRoles', $event)" />
+                  <div class="schema-dataset-roles">
+                    <h4>Roles (comma-separated roles or user IDs)</h4>
+                    <label>Read Roles</label>
+                    <input
+                      type="text"
+                      [ngModel]="getPermissionUsersText('readRoles')"
+                      (ngModelChange)="updatePermissionUsers('readRoles', $event)" />
 
-                <label>Write Roles</label>
-                <input
-                  type="text"
-                  [ngModel]="getPermissionUsersText('writeRoles')"
-                  (ngModelChange)="updatePermissionUsers('writeRoles', $event)" />
+                    <label>Write Roles</label>
+                    <input
+                      type="text"
+                      [ngModel]="getPermissionUsersText('writeRoles')"
+                      (ngModelChange)="updatePermissionUsers('writeRoles', $event)" />
 
-                <label>Signoff Roles</label>
-                <input
-                  type="text"
-                  [ngModel]="getPermissionUsersText('signoffRoles')"
-                  (ngModelChange)="updatePermissionUsers('signoffRoles', $event)" />
+                    <label>Signoff Roles</label>
+                    <input
+                      type="text"
+                      [ngModel]="getPermissionUsersText('signoffRoles')"
+                      (ngModelChange)="updatePermissionUsers('signoffRoles', $event)" />
 
-                <label>Dataset Admin Roles</label>
-                <input
-                  type="text"
-                  [ngModel]="getPermissionUsersText('datasetAdminRoles')"
-                  (ngModelChange)="updatePermissionUsers('datasetAdminRoles', $event)" />
-
-                <button type="button" (click)="saveSchemaEditor()" [disabled]="!canEditSchema() || !!schemaEditorJsonError()">Save Schema</button>
+                    <label>Dataset Admin Roles</label>
+                    <input
+                      type="text"
+                      [ngModel]="getPermissionUsersText('datasetAdminRoles')"
+                      (ngModelChange)="updatePermissionUsers('datasetAdminRoles', $event)" />
+                  </div>
+                </div>
               </section>
 
               <section class="schema-builder-panel">
@@ -370,6 +382,13 @@
                 </div>
                 @for (field of draft.headerFields; track trackByFieldIndex($index)) {
                   <div class="schema-field-card">
+                    <button
+                      type="button"
+                      class="danger icon-delete-btn schema-field-remove-btn"
+                      aria-label="Remove header field"
+                      title="Remove header field"
+                      (click)="removeSchemaField('headerFields', $index)"
+                      [disabled]="!canEditSchema()">✕</button>
                     <div class="schema-field-grid schema-field-grid-header">
                       <label class="schema-field-input">
                         <span class="schema-field-label">Name</span>
@@ -379,7 +398,9 @@
                         <span class="schema-field-label">Label</span>
                         <input type="text" [ngModel]="field.label" (ngModelChange)="updateSchemaField('headerFields', $index, 'label', $event)" />
                       </label>
-                      <label class="schema-field-input">
+                    </div>
+                    <div class="schema-field-type-row">
+                      <label class="schema-field-input schema-type-input">
                         <span class="schema-field-label">Type</span>
                         <select [ngModel]="field.type" (ngModelChange)="updateSchemaField('headerFields', $index, 'type', $event)">
                           <option value="String">String</option>
@@ -390,7 +411,18 @@
                           <option value="Lookup">Lookup</option>
                         </select>
                       </label>
-                      <label class="schema-check"><input type="checkbox" [ngModel]="field.required" (ngModelChange)="updateSchemaField('headerFields', $index, 'required', $event)" /> Required</label>
+                      @if (field.type === 'Select') {
+                      <label class="schema-field-input schema-select-full schema-type-extra">
+                        <span class="schema-field-label">Allowed Values (csv)</span>
+                        <input class="schema-select-full" type="text" [ngModel]="getFieldAllowedValuesText(field)" (ngModelChange)="updateSchemaField('headerFields', $index, 'allowedValues', $event)" />
+                      </label>
+                      }
+                      @if (field.type === 'Lookup') {
+                      <label class="schema-field-input schema-select-full schema-type-extra">
+                        <span class="schema-field-label">Lookup Dataset</span>
+                        <input class="schema-select-full" type="text" [ngModel]="field.lookupDatasetKey ?? ''" (ngModelChange)="updateSchemaField('headerFields', $index, 'lookupDatasetKey', $event)" />
+                      </label>
+                      }
                     </div>
                     <div class="schema-field-limits-row">
                       <label class="schema-field-input">
@@ -405,29 +437,26 @@
                         <span class="schema-field-label">Max</span>
                         <input class="schema-mini-num" type="number" [ngModel]="field.maxValue ?? ''" (ngModelChange)="updateSchemaField('headerFields', $index, 'maxValue', $event)" />
                       </label>
+                      <label class="schema-check"><input type="checkbox" [ngModel]="field.required" (ngModelChange)="updateSchemaField('headerFields', $index, 'required', $event)" /> Required</label>
                     </div>
-                    @if (field.type === 'Select') {
-                    <label class="schema-field-input schema-select-full">
-                      <span class="schema-field-label">Allowed Values (csv)</span>
-                      <input class="schema-select-full" type="text" [ngModel]="getFieldAllowedValuesText(field)" (ngModelChange)="updateSchemaField('headerFields', $index, 'allowedValues', $event)" />
-                    </label>
-                    }
-                    @if (field.type === 'Lookup') {
-                    <label class="schema-field-input schema-select-full">
-                      <span class="schema-field-label">Lookup Dataset</span>
-                      <input class="schema-select-full" type="text" [ngModel]="field.lookupDatasetKey ?? ''" (ngModelChange)="updateSchemaField('headerFields', $index, 'lookupDatasetKey', $event)" />
-                    </label>
-                    }
-                    <button type="button" class="danger mini" (click)="removeSchemaField('headerFields', $index)" [disabled]="!canEditSchema()">Remove</button>
                   </div>
                 }
+              </section>
 
+              <section class="schema-builder-panel">
                 <div class="schema-fields-header">
                   <h4>Detail Fields</h4>
                   <button type="button" class="mini" (click)="addSchemaField('detailFields')" [disabled]="!canEditSchema()">+ Add</button>
                 </div>
                 @for (field of draft.detailFields; track trackByFieldIndex($index)) {
                   <div class="schema-field-card">
+                    <button
+                      type="button"
+                      class="danger icon-delete-btn schema-field-remove-btn"
+                      aria-label="Remove detail field"
+                      title="Remove detail field"
+                      (click)="removeSchemaField('detailFields', $index)"
+                      [disabled]="!canEditSchema()">✕</button>
                     <div class="schema-field-grid schema-field-grid-header">
                       <label class="schema-field-input">
                         <span class="schema-field-label">Name</span>
@@ -437,7 +466,9 @@
                         <span class="schema-field-label">Label</span>
                         <input type="text" [ngModel]="field.label" (ngModelChange)="updateSchemaField('detailFields', $index, 'label', $event)" />
                       </label>
-                      <label class="schema-field-input">
+                    </div>
+                    <div class="schema-field-type-row">
+                      <label class="schema-field-input schema-type-input">
                         <span class="schema-field-label">Type</span>
                         <select [ngModel]="field.type" (ngModelChange)="updateSchemaField('detailFields', $index, 'type', $event)">
                           <option value="String">String</option>
@@ -448,10 +479,18 @@
                           <option value="Lookup">Lookup</option>
                         </select>
                       </label>
-                      <div class="schema-field-checks-row">
-                        <label class="schema-check"><input type="checkbox" [ngModel]="field.required" (ngModelChange)="updateSchemaField('detailFields', $index, 'required', $event)" /> Required</label>
-                        <label class="schema-check"><input type="checkbox" [ngModel]="field.isKey" (ngModelChange)="updateSchemaField('detailFields', $index, 'isKey', $event)" /> Key Field</label>
-                      </div>
+                      @if (field.type === 'Select') {
+                      <label class="schema-field-input schema-select-full schema-type-extra">
+                        <span class="schema-field-label">Allowed Values (csv)</span>
+                        <input class="schema-select-full" type="text" [ngModel]="getFieldAllowedValuesText(field)" (ngModelChange)="updateSchemaField('detailFields', $index, 'allowedValues', $event)" />
+                      </label>
+                      }
+                      @if (field.type === 'Lookup') {
+                      <label class="schema-field-input schema-select-full schema-type-extra">
+                        <span class="schema-field-label">Lookup Dataset</span>
+                        <input class="schema-select-full" type="text" [ngModel]="field.lookupDatasetKey ?? ''" (ngModelChange)="updateSchemaField('detailFields', $index, 'lookupDatasetKey', $event)" />
+                      </label>
+                      }
                     </div>
                     <div class="schema-field-limits-row">
                       <label class="schema-field-input">
@@ -466,35 +505,35 @@
                         <span class="schema-field-label">Max</span>
                         <input class="schema-mini-num" type="number" [ngModel]="field.maxValue ?? ''" (ngModelChange)="updateSchemaField('detailFields', $index, 'maxValue', $event)" />
                       </label>
+                      <label class="schema-check"><input type="checkbox" [ngModel]="field.required" (ngModelChange)="updateSchemaField('detailFields', $index, 'required', $event)" /> Required</label>
+                      <label class="schema-check"><input type="checkbox" [ngModel]="field.isKey" (ngModelChange)="updateSchemaField('detailFields', $index, 'isKey', $event)" /> Key Field</label>
                     </div>
-                    @if (field.type === 'Select') {
-                    <label class="schema-field-input schema-select-full">
-                      <span class="schema-field-label">Allowed Values (csv)</span>
-                      <input class="schema-select-full" type="text" [ngModel]="getFieldAllowedValuesText(field)" (ngModelChange)="updateSchemaField('detailFields', $index, 'allowedValues', $event)" />
-                    </label>
-                    }
-                    @if (field.type === 'Lookup') {
-                    <label class="schema-field-input schema-select-full">
-                      <span class="schema-field-label">Lookup Dataset</span>
-                      <input class="schema-select-full" type="text" [ngModel]="field.lookupDatasetKey ?? ''" (ngModelChange)="updateSchemaField('detailFields', $index, 'lookupDatasetKey', $event)" />
-                    </label>
-                    }
-                    <button type="button" class="danger mini" (click)="removeSchemaField('detailFields', $index)" [disabled]="!canEditSchema()">Remove</button>
                   </div>
                 }
               </section>
+              </div>
 
-              <section class="schema-builder-panel schema-json-panel">
-                <h4>Schema JSON</h4>
-                <label>JSON Editor</label>
-                <textarea
-                  class="schema-editor-area"
-                  [ngModel]="schemaEditorJson()"
-                  (ngModelChange)="onSchemaEditorJsonChange($event)"></textarea>
-                @if (schemaEditorJsonError()) {
-                  <div class="schema-json-error">{{ schemaEditorJsonError() }}</div>
+              <aside class="schema-builder-panel schema-json-panel" [class.collapsed]="schemaJsonPaneCollapsed()">
+                <div class="schema-json-header">
+                  <h4>Schema JSON</h4>
+                  <div class="schema-json-actions">
+                    <button type="button" class="mini" (click)="copySchemaJsonToClipboard()">Copy JSON</button>
+                    <button type="button" class="mini" (click)="toggleSchemaJsonPane()">{{ schemaJsonPaneCollapsed() ? 'Expand' : 'Collapse' }}</button>
+                  </div>
+                </div>
+                @if (!schemaJsonPaneCollapsed()) {
+                  <div class="schema-json-body">
+                    <label>JSON Editor</label>
+                    <textarea
+                      class="schema-editor-area"
+                      [ngModel]="schemaEditorJson()"
+                      (ngModelChange)="onSchemaEditorJsonChange($event)"></textarea>
+                    @if (schemaEditorJsonError()) {
+                      <div class="schema-json-error">{{ schemaEditorJsonError() }}</div>
+                    }
+                  </div>
                 }
-              </section>
+              </aside>
             </div>
           </div>
         } @else {
@@ -502,18 +541,151 @@
             <p>Review audited dataset and schema changes for the current user context.</p>
             <button type="button" (click)="loadAudit()">Refresh</button>
           </div>
-          <div class="audit-tab-list">
-            <ul>
-              @for (event of filteredAuditEvents(); track event.id) {
-                <li>
-                  <strong>{{ event.action }}</strong> | {{ event.datasetKey }} | {{ event.userId }}
-                  <div>{{ event.occurredAtUtc }} - {{ event.details }}</div>
-                </li>
+          <div class="audit-layout">
+            <div class="audit-tab-list">
+              <ul>
+                @for (event of filteredAuditEvents(); track event.id) {
+                  <li>
+                    <button
+                      type="button"
+                      class="audit-event-btn"
+                      [class.active]="selectedAuditEvent()?.id === event.id"
+                      (click)="selectAuditEvent(event.id)">
+                      <strong>{{ event.action }}</strong> | {{ event.datasetKey }} | {{ event.userId }}
+                      <div>{{ event.occurredAtUtc }}</div>
+                    </button>
+                  </li>
+                }
+              </ul>
+            </div>
+
+            <div class="audit-details-panel">
+              @if (selectedAuditEvent(); as selectedEvent) {
+                <div class="audit-details-meta">
+                  <strong>{{ selectedEvent.action }}</strong> | {{ selectedEvent.datasetKey }} | {{ selectedEvent.userId }}
+                  <div>{{ selectedEvent.occurredAtUtc }}</div>
+                </div>
+                @if (selectedAuditHasTabularDetails()) {
+                  @if (selectedAuditUpdatedRows().length > 0) {
+                    <div class="audit-grid-wrap">
+                      <table class="audit-change-table">
+                        <thead>
+                          <tr>
+                            <th rowspan="2">Operation</th>
+                            @if (selectedAuditKeyColumns().length > 0) {
+                              <th [attr.colspan]="selectedAuditKeyColumns().length">Key Fields</th>
+                            }
+                            @for (valueColumn of selectedAuditUpdatedValueColumns(); track valueColumn) {
+                              <th colspan="2">{{ valueColumn }}</th>
+                            }
+                          </tr>
+                          <tr>
+                            @for (keyColumn of selectedAuditKeyColumns(); track keyColumn) {
+                              <th>{{ keyColumn }}</th>
+                            }
+                            @for (valueColumn of selectedAuditUpdatedValueColumns(); track valueColumn) {
+                              <th>Before</th>
+                              <th>After</th>
+                            }
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (row of selectedAuditUpdatedRows(); track row.rowKey + '-' + $index) {
+                            <tr>
+                              <td class="audit-cell-op audit-cell-op-updated">{{ getAuditOperationLabel(row) }}</td>
+                              @for (keyColumn of selectedAuditKeyColumns(); track keyColumn) {
+                                <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
+                              }
+                              @for (valueColumn of selectedAuditUpdatedValueColumns(); track valueColumn) {
+                                <td class="audit-cell-before">{{ getAuditBeforeCellValue(row, valueColumn) }}</td>
+                                <td class="audit-cell-after">{{ getAuditAfterCellValue(row, valueColumn) }}</td>
+                              }
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  }
+
+                  @if (selectedAuditAddedRows().length > 0) {
+                    <div class="audit-grid-wrap">
+                      <table class="audit-change-table">
+                        <thead>
+                          <tr>
+                            <th rowspan="2">Operation</th>
+                            @if (selectedAuditKeyColumns().length > 0) {
+                              <th [attr.colspan]="selectedAuditKeyColumns().length">Key Fields</th>
+                            }
+                            @for (valueColumn of selectedAuditAddedValueColumns(); track valueColumn) {
+                              <th rowspan="2">{{ valueColumn }}</th>
+                            }
+                          </tr>
+                          <tr>
+                            @for (keyColumn of selectedAuditKeyColumns(); track keyColumn) {
+                              <th>{{ keyColumn }}</th>
+                            }
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (row of selectedAuditAddedRows(); track row.rowKey + '-' + $index) {
+                            <tr>
+                              <td class="audit-cell-op audit-cell-op-added">{{ getAuditOperationLabel(row) }}</td>
+                              @for (keyColumn of selectedAuditKeyColumns(); track keyColumn) {
+                                <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
+                              }
+                              @for (valueColumn of selectedAuditAddedValueColumns(); track valueColumn) {
+                                <td>{{ getAuditOperationValue(row, valueColumn, 'added') }}</td>
+                              }
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  }
+
+                  @if (selectedAuditDeletedRows().length > 0) {
+                    <div class="audit-grid-wrap">
+                      <table class="audit-change-table">
+                        <thead>
+                          <tr>
+                            <th rowspan="2">Operation</th>
+                            @if (selectedAuditKeyColumns().length > 0) {
+                              <th [attr.colspan]="selectedAuditKeyColumns().length">Key Fields</th>
+                            }
+                            @for (valueColumn of selectedAuditDeletedValueColumns(); track valueColumn) {
+                              <th rowspan="2">{{ valueColumn }}</th>
+                            }
+                          </tr>
+                          <tr>
+                            @for (keyColumn of selectedAuditKeyColumns(); track keyColumn) {
+                              <th>{{ keyColumn }}</th>
+                            }
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (row of selectedAuditDeletedRows(); track row.rowKey + '-' + $index) {
+                            <tr>
+                              <td class="audit-cell-op audit-cell-op-removed">{{ getAuditOperationLabel(row) }}</td>
+                              @for (keyColumn of selectedAuditKeyColumns(); track keyColumn) {
+                                <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
+                              }
+                              @for (valueColumn of selectedAuditDeletedValueColumns(); track valueColumn) {
+                                <td>{{ getAuditOperationValue(row, valueColumn, 'deleted') }}</td>
+                              }
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  }
+                  <div class="audit-matrix-note">(Blanks indicate nothing was changed)</div>
+                } @else {
+                  <div class="empty-instance">No row-level detail changes were detected for tabular rendering.</div>
+                }
+              } @else {
+                <div class="empty-instance">No audit events found for {{ selectedSchemaKey() }}.</div>
               }
-            </ul>
-            @if (filteredAuditEvents().length === 0) {
-              <p>No audit events found for {{ selectedSchemaKey() }}.</p>
-            }
+            </div>
           </div>
         }
       } @else {
@@ -545,5 +717,156 @@
 @if (isLoadingOverlayVisible()) {
   <div class="loading-overlay" role="status" aria-live="polite" aria-busy="true">
     <div class="loading-overlay-card">{{ loadingOverlayMessage() }}</div>
+  </div>
+}
+
+@if (blockingDialogVisible()) {
+  <div class="blocking-dialog-overlay" role="dialog" aria-modal="true" aria-live="assertive" aria-labelledby="blocking-dialog-title">
+    <div class="blocking-dialog-card">
+      <h3 id="blocking-dialog-title">{{ blockingDialogTitle() }}</h3>
+      <p>{{ blockingDialogMessage() }}</p>
+      <div class="blocking-dialog-actions">
+        <button type="button" (click)="confirmBlockingDialog()">OK</button>
+      </div>
+    </div>
+  </div>
+}
+
+@if (signoffReviewDialogVisible()) {
+  <div class="blocking-dialog-overlay" role="dialog" aria-modal="true" aria-live="polite" aria-labelledby="signoff-review-title">
+    <div class="blocking-dialog-card signoff-review-card">
+      <h3 id="signoff-review-title">Confirm Signoff</h3>
+      <p class="signoff-review-summary">{{ signoffReviewSummary() }}</p>
+
+      @if (signoffAuditHasTabularDetails()) {
+        <div class="signoff-review-list">
+          @if (signoffAuditUpdatedRows().length > 0) {
+            <div class="audit-grid-wrap">
+              <table class="audit-change-table">
+                <thead>
+                  <tr>
+                    <th rowspan="2">User</th>
+                    <th rowspan="2">Operation</th>
+                    @if (signoffAuditKeyColumns().length > 0) {
+                      <th [attr.colspan]="signoffAuditKeyColumns().length">Key Fields</th>
+                    }
+                    @for (valueColumn of signoffAuditUpdatedValueColumns(); track valueColumn) {
+                      <th colspan="2">{{ valueColumn }}</th>
+                    }
+                  </tr>
+                  <tr>
+                    @for (keyColumn of signoffAuditKeyColumns(); track keyColumn) {
+                      <th>{{ keyColumn }}</th>
+                    }
+                    @for (valueColumn of signoffAuditUpdatedValueColumns(); track valueColumn) {
+                      <th>Before</th>
+                      <th>After</th>
+                    }
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of signoffAuditUpdatedRows(); track row.rowKey + '-' + $index) {
+                    <tr>
+                      <td>{{ row.userId }}</td>
+                      <td class="audit-cell-op audit-cell-op-updated">{{ getAuditOperationLabel(row) }}</td>
+                      @for (keyColumn of signoffAuditKeyColumns(); track keyColumn) {
+                        <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
+                      }
+                      @for (valueColumn of signoffAuditUpdatedValueColumns(); track valueColumn) {
+                        <td class="audit-cell-before">{{ getAuditBeforeCellValue(row, valueColumn) }}</td>
+                        <td class="audit-cell-after">{{ getAuditAfterCellValue(row, valueColumn) }}</td>
+                      }
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+
+          @if (signoffAuditAddedRows().length > 0) {
+            <div class="audit-grid-wrap">
+              <table class="audit-change-table">
+                <thead>
+                  <tr>
+                    <th rowspan="2">User</th>
+                    <th rowspan="2">Operation</th>
+                    @if (signoffAuditKeyColumns().length > 0) {
+                      <th [attr.colspan]="signoffAuditKeyColumns().length">Key Fields</th>
+                    }
+                    @for (valueColumn of signoffAuditAddedValueColumns(); track valueColumn) {
+                      <th rowspan="2">{{ valueColumn }}</th>
+                    }
+                  </tr>
+                  <tr>
+                    @for (keyColumn of signoffAuditKeyColumns(); track keyColumn) {
+                      <th>{{ keyColumn }}</th>
+                    }
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of signoffAuditAddedRows(); track row.rowKey + '-' + $index) {
+                    <tr>
+                      <td>{{ row.userId }}</td>
+                      <td class="audit-cell-op audit-cell-op-added">{{ getAuditOperationLabel(row) }}</td>
+                      @for (keyColumn of signoffAuditKeyColumns(); track keyColumn) {
+                        <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
+                      }
+                      @for (valueColumn of signoffAuditAddedValueColumns(); track valueColumn) {
+                        <td>{{ getAuditOperationValue(row, valueColumn, 'added') }}</td>
+                      }
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+
+          @if (signoffAuditDeletedRows().length > 0) {
+            <div class="audit-grid-wrap">
+              <table class="audit-change-table">
+                <thead>
+                  <tr>
+                    <th rowspan="2">User</th>
+                    <th rowspan="2">Operation</th>
+                    @if (signoffAuditKeyColumns().length > 0) {
+                      <th [attr.colspan]="signoffAuditKeyColumns().length">Key Fields</th>
+                    }
+                    @for (valueColumn of signoffAuditDeletedValueColumns(); track valueColumn) {
+                      <th rowspan="2">{{ valueColumn }}</th>
+                    }
+                  </tr>
+                  <tr>
+                    @for (keyColumn of signoffAuditKeyColumns(); track keyColumn) {
+                      <th>{{ keyColumn }}</th>
+                    }
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of signoffAuditDeletedRows(); track row.rowKey + '-' + $index) {
+                    <tr>
+                      <td>{{ row.userId }}</td>
+                      <td class="audit-cell-op audit-cell-op-removed">{{ getAuditOperationLabel(row) }}</td>
+                      @for (keyColumn of signoffAuditKeyColumns(); track keyColumn) {
+                        <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
+                      }
+                      @for (valueColumn of signoffAuditDeletedValueColumns(); track valueColumn) {
+                        <td>{{ getAuditOperationValue(row, valueColumn, 'deleted') }}</td>
+                      }
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        </div>
+      } @else {
+        <div class="empty-instance">No row-level create/update changes were recorded for this review period.</div>
+      }
+
+      <div class="blocking-dialog-actions">
+        <button type="button" class="toggle-btn" (click)="declineSignoffReview()">Decline</button>
+        <button type="button" (click)="confirmSignoffReview()">Confirm Signoff</button>
+      </div>
+    </div>
   </div>
 }

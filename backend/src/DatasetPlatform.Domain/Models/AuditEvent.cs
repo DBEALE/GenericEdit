@@ -33,6 +33,22 @@ public sealed class AuditEvent
     /// <summary>ID of the specific instance affected, if applicable. Null for schema-level operations.</summary>
     public Guid? DatasetInstanceId { get; init; }
 
-    /// <summary>Human-readable description of what changed (e.g. field-level diff for updates).</summary>
-    public string Details { get; init; } = string.Empty;
+    /// <summary>
+    /// Structured row-level change records for instance create/update actions.
+    /// <para>
+    /// Each entry includes key fields and optional source/target value maps.
+    /// Added rows include key fields + target values only.
+    /// Removed rows include key fields + source values only.
+    /// Updated rows include key fields + both source and target values.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<AuditRowChange> RowChanges { get; init; } = new List<AuditRowChange>();
+}
+
+public sealed class AuditRowChange
+{
+    public string Operation { get; init; } = "updated";
+    public IDictionary<string, string> KeyFields { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    public IDictionary<string, string>? SourceValues { get; init; }
+    public IDictionary<string, string>? TargetValues { get; init; }
 }

@@ -50,19 +50,23 @@
     </section>
 
     <div class="criteria-row">
-      <div class="field-group">
-        <label class="field-label">Dataset</label>
-        <select class="field-input" [ngModel]="selectedSchemaKey()" (ngModelChange)="onSchemaKeyChange($event)">
-          <option value="">— Select a dataset —</option>
-          @for (schema of schemas; track schema.key) {
-            <option [value]="schema.key">{{ schema.name }} ({{ schema.key }})</option>
-          }
-        </select>
-      </div>
-      <div class="field-group">
-        <label class="field-label">As Of Date</label>
-        <input type="date" class="field-input" [ngModel]="asOfDate()" (ngModelChange)="asOfDate.set($event)" />
-      </div>
+      @if (showDatasetParam()) {
+        <div class="field-group">
+          <label class="field-label">Dataset</label>
+          <select class="field-input" [ngModel]="selectedSchemaKey()" (ngModelChange)="onSchemaKeyChange($event)">
+            <option value="">— Select a dataset —</option>
+            @for (schema of schemas; track schema.key) {
+              <option [value]="schema.key">{{ schema.name }} ({{ schema.key }})</option>
+            }
+          </select>
+        </div>
+      }
+      @if (showAsOfDateParam()) {
+        <div class="field-group">
+          <label class="field-label">As Of Date</label>
+          <input type="date" class="field-input" [ngModel]="asOfDate()" (ngModelChange)="asOfDate.set($event)" />
+        </div>
+      }
       @if (activeMethodTab() === 'getInstances' || activeMethodTab() === 'getHeaders') {
         <div class="field-group">
           <label class="field-label">Min As Of Date</label>
@@ -73,14 +77,27 @@
           <input type="date" class="field-input" [ngModel]="maxAsOfDate()" (ngModelChange)="maxAsOfDate.set($event)" />
         </div>
       }
-      <div class="field-group">
-        <label class="field-label">State</label>
-        <input type="text" class="field-input" [ngModel]="stateFilter()" (ngModelChange)="stateFilter.set($event)" placeholder="Draft / Pending Approval / Official" />
-      </div>
-      <div class="field-group">
-        <label class="field-label">Instance ID</label>
-        <input type="text" class="field-input" [ngModel]="instanceId()" (ngModelChange)="instanceId.set($event)" placeholder="Guid" />
-      </div>
+      @if (showStateParam()) {
+        <div class="field-group">
+          <label class="field-label">State</label>
+          <input type="text" class="field-input" [ngModel]="stateFilter()" (ngModelChange)="stateFilter.set($event)" placeholder="Draft / Pending Approval / Official" />
+        </div>
+      }
+      @if (showInstanceIdParam()) {
+        <div class="field-group">
+          <label class="field-label">Instance ID</label>
+          <input type="text" class="field-input" [ngModel]="instanceId()" (ngModelChange)="instanceId.set($event)" placeholder="Guid" />
+        </div>
+      }
+      @if (showIncludeInternalInfoParam()) {
+        <div class="field-group">
+          <label class="field-label">Include internal info</label>
+          <label class="checkbox-inline checkbox-inline-compact">
+            <input type="checkbox" [ngModel]="includeInternalInfo()" (ngModelChange)="includeInternalInfo.set($event)" />
+            Include internal info
+          </label>
+        </div>
+      }
     </div>
 
     @if (activeMethodTab() === 'getInstances' || activeMethodTab() === 'getLatestInstance' || activeMethodTab() === 'getHeaders') {
@@ -121,20 +138,12 @@
           </div>
         }
 
-        <label class="field-label">Header Criteria JSON</label>
-        <textarea class="field-textarea" rows="5" [ngModel]="headerCriteriaJson()" (ngModelChange)="headerCriteriaJson.set($event)"></textarea>
         <div class="latest-up-hint">
           <div class="latest-up-hint-title">Latest behavior</div>
           <div class="latest-up-hint-text">
             getLatestInstance returns the latest up to the As Of Date for the selected state and header criteria.
           </div>
         </div>
-      </div>
-    }
-
-    @if (activeMethodTab() === 'getLatestInstance' || activeMethodTab() === 'getInstances' || activeMethodTab() === 'getHeaders') {
-      <div class="field-group">
-        <label class="checkbox-inline"><input type="checkbox" [ngModel]="includeInternalInfo()" (ngModelChange)="includeInternalInfo.set($event)" />Include internal info</label>
       </div>
     }
 

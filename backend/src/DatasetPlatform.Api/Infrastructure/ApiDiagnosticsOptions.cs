@@ -14,6 +14,9 @@ public sealed class ApiDiagnosticsOptions
     // Full logs request/response payload bodies. Compact omits payload bodies and logs only sizes.
     public string Verbosity { get; init; } = FullVerbosity;
 
+    // Retains only the most recent N lines in the diagnostics log file.
+    public int MaxLogRows { get; init; } = 1000;
+
     // When enabled, logs extracted internalInfo.searchEfficiency stats as a compact line.
     public bool LogSearchEfficiencyStats { get; init; }
 

@@ -79,6 +79,30 @@ export class QueryPageComponent {
     return this.schemas.find((s) => this.normalizeDatasetKey(s.key) === normalizedKey) ?? null;
   });
   readonly selectedSchemaHeaderFields = computed(() => this.selectedSchema()?.headerFields ?? []);
+  readonly showDatasetParam = computed(() => {
+    const method = this.activeMethodTab();
+    return method === 'deleteSchema'
+      || method === 'getLatestInstance'
+      || method === 'getHeaders'
+      || method === 'getInstances'
+      || method === 'getInstanceById'
+      || method === 'deleteInstance'
+      || method === 'signoff'
+      || method === 'getLookupValues';
+  });
+  readonly showAsOfDateParam = computed(() => this.activeMethodTab() === 'getLatestInstance');
+  readonly showStateParam = computed(() => {
+    const method = this.activeMethodTab();
+    return method === 'getLatestInstance' || method === 'getInstances' || method === 'getHeaders';
+  });
+  readonly showInstanceIdParam = computed(() => {
+    const method = this.activeMethodTab();
+    return method === 'getInstanceById' || method === 'deleteInstance' || method === 'signoff';
+  });
+  readonly showIncludeInternalInfoParam = computed(() => {
+    const method = this.activeMethodTab();
+    return method === 'getLatestInstance' || method === 'getInstances' || method === 'getHeaders';
+  });
 
   readonly asOfDate = signal(this.todayDate());
   readonly minAsOfDate = signal('');

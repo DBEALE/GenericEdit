@@ -2,12 +2,19 @@
   --bg0: #f5f4ef;
   --bg1: #fffdf8;
   --panel: #ffffff;
+  --panel-soft: color-mix(in oklab, var(--panel) 94%, var(--bg0));
+  --panel-strong: color-mix(in oklab, var(--panel) 86%, var(--bg0));
   --ink: #15222d;
   --muted: #5f6c77;
   --accent: #005f73;
   --accent-soft: #d9f2f5;
   --danger: #9f2a2a;
+  --success: #1f6f3a;
+  --warning: #b54708;
+  --ink-on-accent: #ffffff;
+  --ink-on-danger: #ffffff;
   --border: #dae2e8;
+  --focus-ring: color-mix(in oklab, var(--accent) 26%, transparent);
   --shadow: 0 18px 45px rgba(0, 47, 73, 0.1);
 
   display: block;
@@ -17,13 +24,43 @@
     radial-gradient(circle at 80% 0%, rgba(238, 155, 0, 0.14), transparent 30%),
     linear-gradient(180deg, var(--bg0), var(--bg1));
   color: var(--ink);
-  font-family: Bahnschrift, Candara, 'Trebuchet MS', sans-serif;
+  font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
 }
 
 .page-shell {
   width: 100%;
-  padding: clamp(0.6rem, 1vw, 1.2rem);
+  padding: 0;
   box-sizing: border-box;
+  min-height: 100vh;
+  color: var(--ink);
+}
+
+.page-shell.theme-dark {
+  --bg0: #1d262c;
+  --bg1: #232830;
+  --panel: #252b33;
+  --panel-soft: #21272f;
+  --panel-strong: #2a3039;
+  --ink: #e4e8ed;
+  --muted: #c2cad3;
+  --accent: #8ab8cf;
+  --accent-soft: #313b47;
+  --danger: #ff6d6d;
+  --success: #6bd596;
+  --warning: #f8b56c;
+  --ink-on-accent: #f7fbff;
+  --ink-on-danger: #fff5f5;
+  --border: #3a434e;
+  --focus-ring: color-mix(in oklab, var(--accent) 34%, transparent);
+  --shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
+  background: linear-gradient(180deg, var(--bg0), var(--bg1));
+}
+
+.page-shell.theme-light {
+  background:
+    radial-gradient(circle at 15% 10%, rgba(0, 95, 115, 0.11), transparent 35%),
+    radial-gradient(circle at 80% 0%, rgba(238, 155, 0, 0.14), transparent 30%),
+    linear-gradient(180deg, var(--bg0), var(--bg1));
 }
 
 .loading-overlay {
@@ -41,11 +78,91 @@
   text-align: center;
   padding: 1rem 1.3rem;
   border-radius: 0.9rem;
-  border: 1px solid #c7d4de;
-  background: #f8fbfd;
-  color: #17384a;
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+  color: var(--ink);
   box-shadow: 0 14px 36px rgba(0, 35, 47, 0.28);
   font-weight: 700;
+}
+
+.blocking-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5200;
+  display: grid;
+  place-items: center;
+  background: rgba(20, 28, 34, 0.62);
+  backdrop-filter: blur(1px);
+}
+
+.blocking-dialog-card {
+  width: min(92vw, 860px);
+  max-height: min(80vh, 720px);
+  overflow: auto;
+  padding: 1rem 1.1rem;
+  border-radius: 0.95rem;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 20px 50px rgba(0, 35, 47, 0.35);
+}
+
+.blocking-dialog-card h3 {
+  margin: 0 0 0.6rem;
+  color: var(--danger);
+}
+
+.blocking-dialog-card p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.blocking-dialog-actions {
+  margin-top: 0.9rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.signoff-review-card {
+  max-height: min(84vh, 760px);
+}
+
+.signoff-review-summary {
+  margin-bottom: 0.75rem !important;
+}
+
+.signoff-review-list {
+  max-height: min(52vh, 520px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  padding: 0.55rem;
+  background: var(--panel-soft);
+  display: grid;
+  gap: 0.45rem;
+}
+
+.signoff-review-item {
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  padding: 0.45rem 0.5rem;
+  background: var(--panel);
+}
+
+.signoff-review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.signoff-review-details {
+  white-space: pre-wrap;
+  line-height: 1.35;
 }
 
 .page-hidden {
@@ -53,18 +170,42 @@
 }
 
 .hero {
-  display: grid;
-  grid-template-columns: 1.6fr 1fr;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0;
+  background: var(--panel-strong);
+  border-bottom: 1px solid var(--border);
+}
+
+.hero-brand {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.hero-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.01rem;
+}
+
+.hero-meta span {
+  margin-left: 0.55rem;
+  color: var(--ink);
+  font-weight: 600;
 }
 
 .eyebrow {
   margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.08rem;
-  color: var(--accent);
-  font-weight: 700;
+  letter-spacing: 0.01rem;
+  color: var(--ink);
+  font-size: clamp(1.22rem, 1.1vw + 0.95rem, 1.5rem);
+  font-weight: 560;
+  line-height: 1.15;
 }
 
 h1 {
@@ -82,14 +223,15 @@ h1 {
 .panel {
   border: 1px solid var(--border);
   background: var(--panel);
-  border-radius: 1rem;
+  border-radius: 0.45rem;
   box-shadow: var(--shadow);
 }
 
 .identity-card {
-  padding: 1rem;
+  padding: 0.5rem 0.7rem;
   display: grid;
-  gap: 0.45rem;
+  gap: 0.35rem;
+  max-width: 360px;
 }
 
 .identity-card-header {
@@ -100,8 +242,8 @@ h1 {
 }
 
 .toggle-btn {
-  background: #eaf2f4;
-  color: #34515f;
+  background: var(--accent-soft);
+  color: var(--ink);
 }
 
 .simulation-presets {
@@ -114,14 +256,14 @@ h1 {
 .simulation-preset-btn {
   background: var(--accent-soft);
   color: var(--accent);
-  border: 1px solid color-mix(in oklab, var(--accent) 25%, white);
+  border: 1px solid color-mix(in oklab, var(--accent) 25%, var(--panel));
   padding: 0.35rem 0.6rem;
   border-radius: 999px;
   font-size: 0.82rem;
 }
 
 .simulation-preset-btn:hover {
-  background: color-mix(in oklab, var(--accent-soft) 65%, white);
+  background: color-mix(in oklab, var(--accent-soft) 65%, var(--panel));
 }
 
 .toast-stack {
@@ -146,20 +288,20 @@ h1 {
 }
 
 .info-toast {
-  background: #e8f4f8;
-  border-color: #aed0dc;
-  color: #0f4f61;
+  background: color-mix(in oklab, var(--accent-soft) 74%, var(--panel));
+  border-color: color-mix(in oklab, var(--accent) 34%, var(--border));
+  color: var(--accent);
 }
 
 .success-toast {
-  background: #eaf9ef;
-  border-color: #bfe6cb;
-  color: #1f6f3a;
+  background: color-mix(in oklab, var(--success) 12%, var(--panel));
+  border-color: color-mix(in oklab, var(--success) 32%, var(--border));
+  color: var(--success);
 }
 
 .error-toast {
-  background: #fde9e9;
-  border-color: #f3c7c7;
+  background: color-mix(in oklab, var(--danger) 12%, var(--panel));
+  border-color: color-mix(in oklab, var(--danger) 36%, var(--border));
   color: var(--danger);
 }
 
@@ -168,33 +310,45 @@ h1 {
 .page-nav {
   display: flex;
   gap: 0.4rem;
-  margin-bottom: 1rem;
-  border-bottom: 2px solid var(--border);
-  padding-bottom: 0.2rem;
+  align-items: center;
+  margin-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0 1rem;
+  background: var(--panel-soft);
+}
+
+.theme-toggle-wrap {
+  margin-left: auto;
+}
+
+.theme-toggle-btn {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  min-height: 1.65rem;
+  padding: 0.16rem 0.58rem;
 }
 
 .nav-tab {
-  background: none;
+  background: transparent;
   border: none;
-  border-radius: 0.5rem 0.5rem 0 0;
-  padding: 0.45rem 1.1rem;
-  font-size: 0.9rem;
+  border-radius: 0;
+  border-bottom: 3px solid transparent;
+  padding: 0.62rem 0.9rem 0.46rem;
+  font-size: 0.88rem;
   font-weight: 600;
   color: var(--muted);
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s, border-color 0.15s;
 
   &:hover {
-    color: var(--accent);
-    background: var(--accent-soft);
+    color: var(--ink);
   }
 
   &.active-nav {
-    color: var(--accent);
-    background: var(--accent-soft);
-    border: 1px solid var(--border);
-    border-bottom: 2px solid var(--panel);
-    margin-bottom: -2px;
+    color: var(--ink);
+    background: transparent;
+    border-bottom-color: var(--ink);
   }
 }
 
@@ -202,17 +356,18 @@ h1 {
 
 .grid-layout {
   display: grid;
-  grid-template-columns: 270px minmax(0, 1fr);
+  grid-template-columns: 285px minmax(0, 1fr);
   grid-template-areas:
     'catalog editor';
-  gap: 0.7rem;
+  gap: 0.6rem;
+  padding: 0 0.7rem 0.7rem;
 }
 
 .catalog { grid-area: catalog; }
 .editor { grid-area: editor; }
 
 .panel {
-  padding: 0.75rem;
+  padding: 0.65rem;
 }
 
 .panel h2 {
@@ -270,8 +425,8 @@ h1 {
 .dataset-item {
   text-align: left;
   border: 1px solid var(--border);
-  background: #ffffff;
-  color: #153341;
+  background: var(--panel);
+  color: var(--ink);
   border-radius: 0.7rem;
   padding: 0.6rem 0.75rem;
   display: flex;
@@ -313,15 +468,15 @@ button.icon-delete-btn {
   line-height: 1.1;
   font-size: 0.9rem;
   letter-spacing: 0.01em;
-  color: #355666;
+  color: var(--muted);
   font-weight: 500;
 }
 
 .dataset-item.active {
   border-color: var(--accent);
-  background: #cceaf0;
-  color: #083a48;
-  box-shadow: inset 0 0 0 1px #0d7288;
+  background: color-mix(in oklab, var(--accent-soft) 72%, var(--panel));
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 65%, var(--border));
 }
 
 .dataset-item.active strong {
@@ -329,7 +484,7 @@ button.icon-delete-btn {
 }
 
 .dataset-item.active span {
-  color: #0f4f61;
+  color: color-mix(in oklab, var(--accent) 85%, var(--ink));
   font-weight: 700;
 }
 
@@ -348,7 +503,7 @@ button.icon-delete-btn {
   border: 1px solid var(--border);
   border-radius: 0.7rem;
   margin-bottom: 0.7rem;
-  background: #f8fcfd;
+  background: var(--panel-soft);
 }
 
 .instance-header-grid thead {
@@ -362,16 +517,17 @@ button.icon-delete-btn {
   border-collapse: separate;
   border-spacing: 0;
   font-family: 'Lucida Console', Monaco, monospace;
-  font-size: 0.74rem;
-  line-height: 1.15;
+  font-size: 0.76rem;
+  line-height: 1.2;
 }
 
 .instance-header-grid thead th {
-  background: #eaf4f6;
+  background: var(--panel-strong);
   z-index: 1;
   text-align: left;
   border-bottom: 1px solid var(--border);
-  padding: 0.2rem 0.28rem;
+  padding: 0.28rem 0.34rem;
+  font-weight: 600;
 }
 
 .instance-header-grid thead th.sortable-col {
@@ -379,13 +535,13 @@ button.icon-delete-btn {
   user-select: none;
 
   &:hover {
-    background: #d4ecf0;
+    background: color-mix(in oklab, var(--accent-soft) 62%, var(--panel));
   }
 }
 
 /* Filter row sits in thead, right below the column-header row */
 .instance-header-grid tr.filter-row th {
-  background: #f3fbfc;
+  background: var(--panel-soft);
   padding: 0.1rem 0.2rem;
   border-bottom: 2px solid var(--border);
 }
@@ -398,17 +554,17 @@ button.icon-delete-btn {
   padding: 0.08rem 0.24rem;
   font-size: 0.7rem;
   color: var(--ink);
-  background: #fff;
+  background: var(--panel);
   font-family: inherit;
 
   &::placeholder {
-    color: #9bb0b8;
+    color: color-mix(in oklab, var(--muted) 72%, var(--panel));
   }
 
   &:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(0, 95, 115, 0.15);
+    box-shadow: 0 0 0 2px var(--focus-ring);
   }
 }
 
@@ -427,7 +583,7 @@ button.icon-delete-btn {
   transform: translateY(-50%);
   border: none;
   background: transparent;
-  color: #6f7f88;
+  color: color-mix(in oklab, var(--muted) 85%, var(--panel));
   cursor: pointer;
   font-size: 0.72rem;
   line-height: 1;
@@ -488,7 +644,7 @@ button.icon-delete-btn {
 
 .clear-filters-btn {
   align-self: end;
-  background: #f0f4f6;
+  background: var(--panel-soft);
   border: 1px solid var(--border);
   border-radius: 0.4rem;
   padding: 0.15rem 0.5rem;
@@ -497,14 +653,14 @@ button.icon-delete-btn {
   color: var(--muted);
 
   &:hover {
-    background: #e0eaee;
+    background: var(--panel-strong);
     color: var(--ink);
   }
 }
 
 .instance-header-grid td {
   border-bottom: 1px solid var(--border);
-  padding: 0.18rem 0.28rem;
+  padding: 0.24rem 0.34rem;
   vertical-align: top;
 }
 
@@ -516,12 +672,20 @@ button.icon-delete-btn {
   cursor: pointer;
 }
 
+.instance-header-grid tbody tr:nth-child(even):not(.active-instance-row) {
+  background: color-mix(in oklab, var(--panel) 88%, var(--panel-soft));
+}
+
+.instance-header-grid tbody tr:nth-child(odd):not(.active-instance-row) {
+  background: color-mix(in oklab, var(--panel) 95%, var(--bg0));
+}
+
 .instance-header-grid tbody tr:hover {
-  background: #f0f9fb;
+  background: color-mix(in oklab, var(--accent-soft) 62%, var(--panel));
 }
 
 .active-instance-row {
-  background: #dff3f6;
+  background: color-mix(in oklab, var(--accent-soft) 74%, var(--panel));
 }
 
 .header-chip {
@@ -529,10 +693,10 @@ button.icon-delete-btn {
   margin-right: 0.14rem;
   margin-bottom: 0.1rem;
   padding: 0.04rem 0.18rem;
-  border: 1px solid #c7dbe0;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #365261;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: var(--panel);
+  color: var(--muted);
 }
 
 .empty-instance {
@@ -557,6 +721,7 @@ button.icon-delete-btn {
 
 .workspace-heading h2 {
   margin: 0;
+  color: var(--ink);
 }
 
 .dataset-meta p {
@@ -572,9 +737,9 @@ button.icon-delete-btn {
 .pill {
   display: inline-flex;
   align-items: center;
-  border: 1px solid #b9d9dd;
-  background: #e9f8fa;
-  color: #0f4f61;
+  border: 1px solid color-mix(in oklab, var(--accent) 26%, var(--border));
+  background: color-mix(in oklab, var(--accent-soft) 70%, var(--panel));
+  color: var(--accent);
   border-radius: 999px;
   padding: 0.15rem 0.55rem;
   font-size: 0.82rem;
@@ -582,7 +747,7 @@ button.icon-delete-btn {
 
 .pill.muted {
   border-color: var(--border);
-  background: #f6f9fb;
+  background: var(--panel-soft);
   color: var(--muted);
 }
 
@@ -590,16 +755,23 @@ button.icon-delete-btn {
   display: flex;
   gap: 0.5rem;
   margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
 }
 
 .tab {
-  background: #eaf2f4;
-  color: #34515f;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 0;
+  border-bottom: 3px solid transparent;
+  min-height: 1.8rem;
+  padding: 0.2rem 0.52rem;
+  margin-bottom: -1px;
 }
 
 .tab.active-tab {
-  background: var(--accent);
-  color: white;
+  background: transparent;
+  color: var(--ink);
+  border-bottom-color: var(--ink);
 }
 
 .toolbar label {
@@ -609,16 +781,16 @@ button.icon-delete-btn {
 
 .validation-panel {
   margin-bottom: 0.7rem;
-  border: 1px solid #f1c6c6;
-  background: #fff4f4;
+  border: 1px solid color-mix(in oklab, var(--danger) 40%, var(--border));
+  background: color-mix(in oklab, var(--danger) 10%, var(--panel));
   border-radius: 0.8rem;
   padding: 0.6rem 0.75rem;
 }
 
 .section-divider {
   height: 0;
-  border-top: 2px solid #c7d6dd;
-  border-bottom: 1px solid #edf3f6;
+  border-top: 2px solid color-mix(in oklab, var(--border) 85%, var(--ink));
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 75%, var(--panel));
   margin: 0.5rem 0 0.7rem;
 }
 
@@ -668,6 +840,7 @@ button.icon-delete-btn {
 
 .section-heading-row h3 {
   margin: 0;
+  color: var(--ink);
 }
 
 .row-count {
@@ -679,7 +852,7 @@ button.icon-delete-btn {
 
 .unsaved-indicator {
   margin-left: 0.32rem;
-  color: #b54708;
+  color: var(--warning);
   font-weight: 700;
   font-size: 0.95rem;
 }
@@ -719,17 +892,38 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 0.45rem;
   padding: 0.4rem 0.5rem;
-  background: white;
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .invalid-input {
   border-color: var(--danger);
-  background: #fff9f9;
+  background: color-mix(in oklab, var(--danger) 7%, var(--panel));
 }
 
 .schema-editor-pane {
   display: grid;
   gap: 0.7rem;
+}
+
+.schema-editor-pane > p {
+  color: var(--muted);
+}
+
+.schema-layout {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 0.48fr);
+  align-items: start;
+}
+
+.schema-layout.json-collapsed {
+  grid-template-columns: minmax(0, 1fr) 220px;
+}
+
+.schema-main-stack {
+  display: grid;
+  gap: 0.8rem;
 }
 
 .schema-builder-grid {
@@ -743,9 +937,35 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 0.7rem;
   padding: 0.65rem;
-  background: #f9fcfc;
+  background: var(--panel-soft);
   display: grid;
   gap: 0.45rem;
+}
+
+.schema-builder-panel > label {
+  color: var(--muted);
+}
+
+.schema-dataset-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.schema-dataset-main,
+.schema-dataset-roles {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.schema-dataset-roles {
+  padding-left: 0.65rem;
+  border-left: 1px solid var(--border);
+}
+
+.schema-dataset-roles h4 {
+  margin-top: 0;
 }
 
 .schema-builder-panel h4 {
@@ -765,12 +985,19 @@ textarea {
 }
 
 .schema-field-card {
-  border: 1px solid #dce8ea;
+  position: relative;
+  border: 1px solid var(--border);
   border-radius: 0.55rem;
-  background: white;
-  padding: 0.45rem;
+  background: var(--panel);
+  padding: 1.75rem 0.45rem 0.45rem;
   display: grid;
   gap: 0.45rem;
+}
+
+.schema-field-remove-btn {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
 }
 
 .schema-field-grid {
@@ -795,10 +1022,28 @@ textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.schema-field-type-row {
+  display: flex;
+  gap: 0.35rem;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.schema-type-input {
+  min-width: 10rem;
+  max-width: 12rem;
+}
+
+.schema-type-extra {
+  flex: 1;
+  min-width: 12rem;
+}
+
 .schema-field-limits-row {
   display: flex;
   gap: 0.35rem;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .schema-mini-num {
@@ -830,6 +1075,28 @@ textarea {
   top: 0.5rem;
 }
 
+.schema-json-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.schema-json-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.schema-json-body {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.schema-json-panel.collapsed {
+  padding-bottom: 0.5rem;
+}
+
 .schema-json-error {
   color: var(--danger);
   font-size: 0.8rem;
@@ -850,11 +1117,11 @@ textarea {
 
 button {
   border: none;
-  border-radius: 0.55rem;
+  border-radius: 0.35rem;
   min-height: 1.9rem;
   padding: 0.25rem 0.65rem;
   background: var(--accent);
-  color: white;
+  color: var(--ink-on-accent);
   cursor: pointer;
   font-size: 0.82rem;
   line-height: 1.2;
@@ -870,6 +1137,7 @@ button:disabled {
 
 button.danger {
   background: var(--danger);
+  color: var(--ink-on-danger);
 }
 
 button.mini {
@@ -900,24 +1168,298 @@ button.mini {
   color: var(--muted);
 }
 
+.audit-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.7fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.audit-tab-list {
+  margin-top: 0.8rem;
+}
+
 .audit-tab-list ul {
   list-style: none;
   padding: 0;
-  margin: 0.8rem 0 0;
+  margin: 0;
   display: grid;
   gap: 0.5rem;
 }
 
 .audit-tab-list li {
+  margin: 0;
+}
+
+.audit-event-btn {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  gap: 0.2rem;
+  justify-content: start;
   border: 1px solid var(--border);
   border-radius: 0.7rem;
+  padding: 0.55rem 0.65rem;
+  background: var(--panel-soft);
+  color: var(--ink);
+}
+
+.audit-event-btn strong {
+  color: var(--ink);
+}
+
+.audit-event-btn.active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 50%, var(--border));
+  background: color-mix(in oklab, var(--accent-soft) 56%, var(--panel));
+}
+
+.audit-details-panel {
+  margin-top: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--panel-soft);
   padding: 0.6rem;
-  background: #fcfffb;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.audit-details-meta {
+  color: var(--ink);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.audit-grid-wrap {
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  overflow: hidden;
+  max-height: clamp(220px, 34vh, 380px);
+  overflow: auto;
+}
+
+.audit-grid-wrap + .audit-grid-wrap {
+  margin-top: 0.9rem;
+}
+
+.audit-change-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  table-layout: auto;
+}
+
+.audit-change-table thead th {
+  text-align: left;
+  padding: 0.42rem 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--panel-strong);
+  color: var(--ink);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  white-space: nowrap;
+}
+
+.audit-change-table tbody td {
+  padding: 0.36rem 0.5rem;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.audit-matrix-note {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.audit-raw-details {
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  padding: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: var(--panel);
+  white-space: pre-wrap;
+  line-height: 1.35;
+}
+
+.page-shell.theme-dark .instance-header-grid-wrap,
+.page-shell.theme-dark .header-table-wrap,
+.page-shell.theme-dark .table-wrap,
+.page-shell.theme-dark .empty-instance,
+.page-shell.theme-dark .validation-panel {
+  background: color-mix(in oklab, var(--panel) 92%, black);
+}
+
+.page-shell.theme-dark .instance-header-grid thead th,
+.page-shell.theme-dark .instance-header-grid tr.filter-row th,
+.page-shell.theme-dark th,
+.page-shell.theme-dark td {
+  background: color-mix(in oklab, var(--panel) 86%, black);
+  color: var(--ink);
+}
+
+.page-shell.theme-dark .instance-header-grid tbody tr:hover td {
+  background: color-mix(in oklab, var(--accent-soft) 52%, var(--panel));
+}
+
+.page-shell.theme-dark .instance-header-grid tbody tr.active-instance-row td {
+  background: color-mix(in oklab, var(--accent-soft) 72%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 58%, var(--border));
+}
+
+.page-shell.theme-dark .header-chip,
+.page-shell.theme-dark .pill {
+  background: color-mix(in oklab, var(--panel) 80%, black);
+}
+
+.page-shell.theme-dark .toggle-btn,
+.page-shell.theme-dark .tab,
+.page-shell.theme-dark .nav-tab,
+.page-shell.theme-dark .clear-filters-btn {
+  color: var(--ink);
+}
+
+.page-shell.theme-dark .panel h2,
+.page-shell.theme-dark .panel h3,
+.page-shell.theme-dark .panel h4,
+.page-shell.theme-dark .dataset-item strong,
+.page-shell.theme-dark .dataset-item span,
+.page-shell.theme-dark .audit-event-btn,
+.page-shell.theme-dark .audit-event-btn strong,
+.page-shell.theme-dark .audit-details-meta {
+  color: var(--ink);
+}
+
+.page-shell.theme-dark .blocking-dialog-card,
+.page-shell.theme-dark .loading-overlay-card {
+  background: color-mix(in oklab, var(--panel) 95%, black);
+  color: var(--ink);
+  border-color: var(--border);
+}
+
+.page-shell.theme-dark .toast {
+  border-color: var(--border);
+}
+
+:host ::ng-deep .page-shell.theme-dark .ag-theme-quartz {
+  --ag-background-color: color-mix(in oklab, var(--panel) 92%, black);
+  --ag-foreground-color: var(--ink);
+  --ag-data-color: var(--ink);
+  --ag-header-text-color: var(--ink);
+  --ag-header-background-color: color-mix(in oklab, var(--panel) 82%, black);
+  --ag-odd-row-background-color: color-mix(in oklab, var(--panel) 88%, black);
+  --ag-row-hover-color: color-mix(in oklab, var(--accent-soft) 46%, var(--panel));
+  --ag-selected-row-background-color: color-mix(in oklab, var(--accent-soft) 62%, var(--panel));
+  --ag-input-background-color: color-mix(in oklab, var(--panel) 95%, black);
+  --ag-input-text-color: var(--ink);
+  --ag-input-border-color: var(--border);
+  --ag-border-color: var(--border);
 }
 
 :host ::ng-deep .ag-theme-quartz .cell-invalid {
-  background: #fff0f0;
-  box-shadow: inset 0 0 0 1px rgba(159, 42, 42, 0.45);
+  background: color-mix(in oklab, var(--danger) 12%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--danger) 42%, transparent);
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-op,
+.audit-change-table .audit-cell-op {
+  font-weight: 700;
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-op {
+  font-weight: 700;
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-op-added,
+.audit-change-table .audit-cell-op-added {
+  background: color-mix(in oklab, var(--success) 20%, var(--panel));
+  color: var(--ink);
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-op-added {
+  color: color-mix(in oklab, var(--success) 90%, black);
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-op-removed,
+.audit-change-table .audit-cell-op-removed {
+  background: color-mix(in oklab, var(--danger) 20%, var(--panel));
+  color: var(--ink);
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-op-removed {
+  color: color-mix(in oklab, var(--danger) 90%, black);
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-op-updated,
+.audit-change-table .audit-cell-op-updated {
+  background: color-mix(in oklab, var(--warning) 20%, var(--panel));
+  color: var(--ink);
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-op-updated {
+  color: color-mix(in oklab, var(--warning) 85%, black);
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-added,
+.audit-change-table .audit-cell-added {
+  background: transparent;
+  box-shadow: none;
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-added {
+  background: color-mix(in oklab, var(--success) 15%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--success) 40%, transparent);
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-removed,
+.audit-change-table .audit-cell-removed {
+  background: transparent;
+  box-shadow: none;
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-removed {
+  background: color-mix(in oklab, var(--danger) 15%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--danger) 42%, transparent);
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-updated-before,
+.audit-change-table .audit-cell-updated-before {
+  background: transparent;
+  box-shadow: none;
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-updated-before {
+  background: color-mix(in oklab, var(--warning) 12%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 35%, transparent);
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-updated-after,
+.audit-change-table .audit-cell-updated-after {
+  background: transparent;
+  box-shadow: none;
+}
+
+:host ::ng-deep .ag-theme-quartz .audit-cell-updated-after {
+  background: color-mix(in oklab, var(--success) 12%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--success) 35%, transparent);
+}
+
+:host ::ng-deep .page-shell.theme-dark .ag-theme-quartz .audit-cell-op-added {
+  background: color-mix(in oklab, var(--success) 24%, var(--panel));
+  color: var(--ink);
+}
+
+:host ::ng-deep .page-shell.theme-dark .ag-theme-quartz .audit-cell-op-removed {
+  background: color-mix(in oklab, var(--danger) 24%, var(--panel));
+  color: var(--ink);
+}
+
+:host ::ng-deep .page-shell.theme-dark .ag-theme-quartz .audit-cell-op-updated {
+  background: color-mix(in oklab, var(--warning) 24%, var(--panel));
+  color: var(--ink);
 }
 
 :host ::ng-deep .ag-theme-quartz button.detail-row-delete-btn {
@@ -952,7 +1494,8 @@ button.mini {
   }
 
   .hero {
-    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .schema-editor-area {
@@ -960,8 +1503,25 @@ button.mini {
     max-height: calc(100vh - 320px);
   }
 
+  .schema-layout,
+  .schema-layout.json-collapsed,
   .schema-builder-grid {
     grid-template-columns: 1fr;
+  }
+
+  .audit-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .schema-dataset-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .schema-dataset-roles {
+    padding-left: 0;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    padding-top: 0.6rem;
   }
 
   .schema-json-panel {

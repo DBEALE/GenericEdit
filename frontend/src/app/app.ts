@@ -4,12 +4,31 @@ import { FormsModule } from '@angular/forms';
 import { AgGridAngular } from 'ag-grid-angular';
 import { CellClassParams, ColDef, GetRowIdParams, GridApi, GridReadyEvent, ICellEditorComp, ICellEditorParams, ICellRendererParams, ValueParserParams, ValueSetterParams } from 'ag-grid-community';
 import { DatasetApiService } from './dataset-api.service';
-import { AuditEvent, DatasetHeaderSummary, DatasetHeadersQueryResponse, DatasetInstance, DatasetInternalInfo, DatasetLatestInstanceQueryResponse, DatasetSchema, DatasetState, SchemaField } from './models';
+import { AuditEvent, AuditRowChange, DatasetHeaderSummary, DatasetHeadersQueryResponse, DatasetInstance, DatasetInternalInfo, DatasetLatestInstanceQueryResponse, DatasetSchema, DatasetState, SchemaField } from './models';
 import { QueryPageComponent } from './query-page/query-page';
 
 type DetailGridRow = Record<string, unknown> & { __rowKey: string };
 type UserSimulationPreset = { label: string; userId: string; roles: string[] };
 type SavedHeaderDatePreset = 'Last month' | 'Last 3 months' | 'Last 6 months' | 'Last 1 year';
+type SignoffReviewItem = {
+  id: string;
+  occurredAtUtc: string;
+  userId: string;
+  action: string;
+  rowChanges?: AuditRowChange[];
+};
+
+type SignoffAuditGridRow = AuditDetailGridRow & {
+  userId: string;
+  occurredAtUtc: string;
+};
+type AuditDetailGridRow = {
+  rowKey: string;
+  operation: string;
+  keyValues: Record<string, string>;
+  beforeValues: Record<string, string>;
+  afterValues: Record<string, string>;
+};
 
 // Keeps state editing flexible: free typing is allowed, with common values suggested.
 class StateHybridCellEditor implements ICellEditorComp {
@@ -142,6 +161,7 @@ export class App {
   private readonly includeInternalInfoDebug = (globalThis as { __datasetUiDebugIncludeInternalInfo?: boolean }).__datasetUiDebugIncludeInternalInfo === true;
 
   readonly currentPage = signal<'editor' | 'query'>('editor');
+  readonly theme = signal<'dark' | 'light'>('dark');
   readonly userId = signal('Admin');
   readonly roleInput = signal('Reader,Writer,Approver,Admin,DatasetAdmin');
   readonly userSimulationPresets: UserSimulationPreset[] = [
@@ -180,8 +200,10 @@ export class App {
   readonly schemaEditorJson = signal<string>('');
   readonly schemaBuilderDraft = signal<DatasetSchema | null>(null);
   readonly schemaEditorJsonError = signal<string>('');
+  readonly schemaJsonPaneCollapsed = signal(false);
   readonly lookupPermissibleValues = signal<Record<string, string[]>>({});
   readonly auditEvents = signal<AuditEvent[]>([]);
+  readonly selectedAuditEventId = signal('');
   readonly filteredAuditEvents = computed(() => {
     const selectedDatasetKey = this.selectedSchemaKey().trim();
     if (selectedDatasetKey.length === 0) {
@@ -191,6 +213,28 @@ export class App {
     return this.auditEvents().filter((event) =>
       event.datasetKey.localeCompare(selectedDatasetKey, undefined, { sensitivity: 'accent' }) === 0);
   });
+  readonly selectedAuditEvent = computed(() => {
+    const events = this.filteredAuditEvents();
+    if (events.length === 0) {
+      return null;
+    }
+
+    const selectedId = this.selectedAuditEventId().trim();
+    if (selectedId.length === 0) {
+      return events[0];
+    }
+
+    return events.find((event) => event.id === selectedId) ?? events[0];
+  });
+  readonly selectedAuditDetailRows = computed(() => this.parseAuditDetailGridRows(this.selectedAuditEvent()));
+  readonly selectedAuditKeyColumns = computed(() => this.collectAuditColumns(this.selectedAuditDetailRows(), 'keyValues'));
+  readonly selectedAuditUpdatedRows = computed(() => this.selectedAuditDetailRows().filter((row) => this.getAuditOperationType(row) === 'updated'));
+  readonly selectedAuditAddedRows = computed(() => this.selectedAuditDetailRows().filter((row) => this.getAuditOperationType(row) === 'added'));
+  readonly selectedAuditDeletedRows = computed(() => this.selectedAuditDetailRows().filter((row) => this.getAuditOperationType(row) === 'deleted'));
+  readonly selectedAuditUpdatedValueColumns = computed(() => this.collectAuditValueColumns(this.selectedAuditUpdatedRows()));
+  readonly selectedAuditAddedValueColumns = computed(() => this.collectAuditValueColumns(this.selectedAuditAddedRows()));
+  readonly selectedAuditDeletedValueColumns = computed(() => this.collectAuditValueColumns(this.selectedAuditDeletedRows()));
+  readonly selectedAuditHasTabularDetails = computed(() => this.selectedAuditDetailRows().length > 0);
   readonly datasetInstances = signal<DatasetHeaderSummary[]>([]);
   readonly selectedInstanceId = signal('');
   readonly instanceSortCol = signal<string>('asOfDate');
@@ -251,6 +295,21 @@ export class App {
   });
   readonly statusToast = signal('');
   readonly error = signal<string>('');
+  readonly blockingDialogVisible = signal(false);
+  readonly blockingDialogTitle = signal('Action blocked');
+  readonly blockingDialogMessage = signal('');
+  readonly signoffReviewDialogVisible = signal(false);
+  readonly signoffReviewSummary = signal('');
+  readonly signoffReviewItems = signal<SignoffReviewItem[]>([]);
+  readonly signoffAuditRows = computed(() => this.buildSignoffAuditRows(this.signoffReviewItems()));
+  readonly signoffAuditKeyColumns = computed(() => this.collectAuditColumns(this.signoffAuditRows(), 'keyValues'));
+  readonly signoffAuditUpdatedRows = computed(() => this.signoffAuditRows().filter((row) => this.getAuditOperationType(row) === 'updated'));
+  readonly signoffAuditAddedRows = computed(() => this.signoffAuditRows().filter((row) => this.getAuditOperationType(row) === 'added'));
+  readonly signoffAuditDeletedRows = computed(() => this.signoffAuditRows().filter((row) => this.getAuditOperationType(row) === 'deleted'));
+  readonly signoffAuditUpdatedValueColumns = computed(() => this.collectAuditValueColumns(this.signoffAuditUpdatedRows()));
+  readonly signoffAuditAddedValueColumns = computed(() => this.collectAuditValueColumns(this.signoffAuditAddedRows()));
+  readonly signoffAuditDeletedValueColumns = computed(() => this.collectAuditValueColumns(this.signoffAuditDeletedRows()));
+  readonly signoffAuditHasTabularDetails = computed(() => this.signoffAuditRows().length > 0);
   readonly saveNotice = signal('');
   readonly internalInfoStatus = signal('');
   readonly showValidation = signal(false);
@@ -261,6 +320,7 @@ export class App {
   private errorToastTimer?: ReturnType<typeof setTimeout>;
   private schemaJsonSyncInProgress = false;
   private lookupOptionsRequestId = 0;
+  private pendingSignoffRequest: { datasetKey: string; instanceId: string } | null = null;
 
   readonly canCreateSchema = computed(() => this.hasRole('DatasetAdmin'));
   readonly canEditSchema = computed(() => {
@@ -504,8 +564,16 @@ export class App {
   });
 
   constructor() {
+    const savedTheme = this.readSavedTheme();
+    this.theme.set(savedTheme);
     this.applySavedHeaderDatePreset('Last month', true);
     this.loadSchemas();
+  }
+
+  toggleTheme(): void {
+    const next = this.theme() === 'dark' ? 'light' : 'dark';
+    this.theme.set(next);
+    this.saveTheme(next);
   }
 
   applySavedHeaderDatePreset(preset: SavedHeaderDatePreset, autoSearch = true): void {
@@ -977,6 +1045,26 @@ export class App {
     }
   }
 
+  toggleSchemaJsonPane(): void {
+    this.schemaJsonPaneCollapsed.set(!this.schemaJsonPaneCollapsed());
+  }
+
+  async copySchemaJsonToClipboard(): Promise<void> {
+    const jsonText = this.schemaEditorJson();
+    if (!jsonText.trim()) {
+      this.setError({ error: 'Schema JSON is empty.' });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(jsonText);
+      this.setStatus('Schema JSON copied to clipboard');
+      this.setSaveNotice('JSON copied to clipboard');
+    } catch {
+      this.setError({ error: 'Unable to copy JSON to clipboard. Please allow clipboard access, then try again.' });
+    }
+  }
+
   deleteAllDetailRows(): void {
     const totalRows = this.detailGridRows().length;
     if (totalRows === 0) {
@@ -1363,9 +1451,54 @@ export class App {
       return;
     }
 
+    if (!this.canSignoff()) {
+      this.setError({ error: `Approval is not permitted for '${this.userId().trim()}' because this user does not have Signoff permission for dataset ${schema.key}.` });
+      return;
+    }
+
     this.clearError();
+    this.setStatus('Loading signoff review...');
+    this.api.getAudit(this.userId(), this.roles(), schema.key).subscribe({
+      next: (audit) => {
+        const eligibility = this.evaluateSignoffEligibility(audit, current.id, this.userId());
+        if (!eligibility.allowed) {
+          this.pendingSignoffRequest = null;
+          this.setError({ error: eligibility.reason ?? 'Approval is not permitted for this user.' });
+          return;
+        }
+
+        const review = this.buildSignoffReview(audit, current.id);
+        this.signoffReviewSummary.set(review.summary);
+        this.signoffReviewItems.set(review.items);
+        this.pendingSignoffRequest = { datasetKey: schema.key, instanceId: current.id };
+        this.signoffReviewDialogVisible.set(true);
+        this.setStatus('Review changes and confirm signoff.');
+      },
+      error: (err) => this.setError(err)
+    });
+  }
+
+  confirmSignoffReview(): void {
+    const request = this.pendingSignoffRequest;
+    if (!request) {
+      this.signoffReviewDialogVisible.set(false);
+      return;
+    }
+
+    this.signoffReviewDialogVisible.set(false);
+    this.executeSignoff(request.datasetKey, request.instanceId);
+  }
+
+  declineSignoffReview(): void {
+    this.signoffReviewDialogVisible.set(false);
+    this.pendingSignoffRequest = null;
+    this.setStatus('Signoff canceled.');
+  }
+
+  private executeSignoff(datasetKey: string, instanceId: string): void {
+    this.pendingSignoffRequest = null;
     this.setStatus('Submitting signoff...');
-    this.api.signoff(this.userId(), this.roles(), schema.key, current.id).subscribe({
+    this.api.signoff(this.userId(), this.roles(), datasetKey, instanceId).subscribe({
       next: (official) => {
         this.currentInstance.set(official);
         this.selectedInstanceId.set(official.id);
@@ -1376,6 +1509,127 @@ export class App {
       },
       error: (err) => this.setError(err)
     });
+  }
+
+  private buildSignoffReview(audit: AuditEvent[], instanceId: string): { summary: string; items: SignoffReviewItem[] } {
+    const targetId = instanceId.trim().toLowerCase();
+    const instanceEvents = audit
+      .filter((event) => (event.datasetInstanceId ?? '').trim().toLowerCase() === targetId)
+      .sort((left, right) =>
+        new Date(left.occurredAtUtc).getTime() - new Date(right.occurredAtUtc).getTime());
+
+    const lastSignoff = [...instanceEvents]
+      .reverse()
+      .find((event) => event.action.toUpperCase() === 'INSTANCE_SIGNOFF');
+
+    const baselineTime = lastSignoff ? new Date(lastSignoff.occurredAtUtc).getTime() : Number.NEGATIVE_INFINITY;
+    const items = instanceEvents
+      .filter((event) => {
+        const action = event.action.toUpperCase();
+        if (action !== 'INSTANCE_CREATE' && action !== 'INSTANCE_UPDATE') {
+          return false;
+        }
+
+        return new Date(event.occurredAtUtc).getTime() > baselineTime;
+      })
+      .map((event) => ({
+        id: event.id,
+        occurredAtUtc: event.occurredAtUtc,
+        userId: event.userId,
+        action: event.action,
+        rowChanges: event.rowChanges
+      }));
+
+    const contributors = Array.from(new Set(items.map((x) => x.userId.trim()).filter((x) => x.length > 0)));
+    const baselineText = lastSignoff
+      ? `Last signoff: ${new Date(lastSignoff.occurredAtUtc).toLocaleString()}`
+      : 'No prior signoff found for this instance.';
+
+    if (items.length === 0) {
+      return {
+        summary: `${baselineText} No create/update changes were recorded since that signoff.`,
+        items
+      };
+    }
+
+    const contributorLabel = contributors.length === 1 ? 'user' : 'users';
+    return {
+      summary: `${baselineText} ${items.length} changes were recorded by ${contributors.length} ${contributorLabel} since then: ${contributors.join(', ')}.`,
+      items
+    };
+  }
+
+  private evaluateSignoffEligibility(
+    audit: AuditEvent[],
+    instanceId: string,
+    userId: string): { allowed: boolean; reason?: string } {
+    const targetId = instanceId.trim().toLowerCase();
+    const normalizedUser = userId.trim();
+    const instanceEvents = audit
+      .filter((event) => (event.datasetInstanceId ?? '').trim().toLowerCase() === targetId)
+      .sort((left, right) =>
+        new Date(left.occurredAtUtc).getTime() - new Date(right.occurredAtUtc).getTime());
+
+    const lastSignoff = [...instanceEvents]
+      .reverse()
+      .find((event) => event.action.toUpperCase() === 'INSTANCE_SIGNOFF');
+    const baselineTime = lastSignoff ? new Date(lastSignoff.occurredAtUtc).getTime() : Number.NEGATIVE_INFINITY;
+
+    const changesSinceLastSignoff = instanceEvents.filter((event) => {
+      const action = event.action.toUpperCase();
+      if (action !== 'INSTANCE_CREATE' && action !== 'INSTANCE_UPDATE') {
+        return false;
+      }
+
+      return new Date(event.occurredAtUtc).getTime() > baselineTime;
+    });
+
+    const approverChangeCount = changesSinceLastSignoff.filter((event) =>
+      event.userId.trim().localeCompare(normalizedUser, undefined, { sensitivity: 'accent' }) === 0).length;
+
+    if (approverChangeCount <= 0) {
+      return { allowed: true };
+    }
+
+    const contributors = Array.from(new Set(
+      changesSinceLastSignoff
+        .map((event) => event.userId.trim())
+        .filter((value) => value.length > 0)))
+      .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
+
+    const changeWord = approverChangeCount === 1 ? 'change' : 'changes';
+    return {
+      allowed: false,
+      reason: `Approval is not permitted for '${normalizedUser}' because ${approverChangeCount} ${changeWord} were made by this user since the last approved version. Contributors since last approval: ${contributors.join(', ')}.`
+    };
+  }
+
+  private buildSignoffAuditRows(items: SignoffReviewItem[]): SignoffAuditGridRow[] {
+    const rows: SignoffAuditGridRow[] = [];
+
+    for (const item of items) {
+      if (!Array.isArray(item.rowChanges) || item.rowChanges.length === 0) {
+        continue;
+      }
+
+      item.rowChanges.forEach((change, index) => {
+        const mapped = this.mapSingleAuditChangeToMatrixRow(
+          change.operation,
+          this.normalizeAuditValueMap(change.keyFields),
+          change.sourceValues ?? {},
+          change.targetValues ?? {},
+          '');
+
+        rows.push({
+          ...mapped,
+          userId: item.userId,
+          occurredAtUtc: item.occurredAtUtc,
+          rowKey: `${item.id}|${index}|${mapped.rowKey}`
+        });
+      });
+    }
+
+    return rows;
   }
 
   saveSchemaEditor(): void {
@@ -1460,12 +1714,17 @@ export class App {
       return;
     }
 
+    const nextIndex = current[section].length + 1;
+    const isHeader = section === 'headerFields';
+    const defaultName = `${isHeader ? 'Header' : 'Detail'}${nextIndex}`;
+
     const newField: SchemaField = {
-      name: '',
-      label: '',
+      name: defaultName,
+      label: defaultName,
       type: 'String',
-      isKey: false,
-      required: false,
+      isKey: isHeader ? false : true,
+      required: true,
+      maxLength: 64,
       allowedValues: []
     };
 
@@ -1563,10 +1822,15 @@ export class App {
     this.api.getAudit(this.userId(), this.roles(), this.selectedSchemaKey()).subscribe({
       next: (audit) => {
         this.auditEvents.set(audit);
+        this.selectedAuditEventId.set(audit[0]?.id ?? '');
         this.setStatus(`Loaded ${audit.length} audit events for ${this.selectedSchemaKey()}`);
       },
       error: (err) => this.setError(err)
     });
+  }
+
+  selectAuditEvent(eventId: string): void {
+    this.selectedAuditEventId.set(eventId);
   }
 
   activateAuditTab(): void {
@@ -2268,6 +2532,248 @@ export class App {
     };
   }
 
+  private parseAuditDetailGridRows(event: AuditEvent | null): AuditDetailGridRow[] {
+    if (!event) {
+      return [];
+    }
+
+    return this.mapStructuredAuditRows(event.rowChanges);
+  }
+
+  private mapStructuredAuditRows(rowChanges: AuditRowChange[] | undefined): AuditDetailGridRow[] {
+    if (!Array.isArray(rowChanges) || rowChanges.length === 0) {
+      return [];
+    }
+
+    return rowChanges.map((change) =>
+      this.mapSingleAuditChangeToMatrixRow(
+        change.operation,
+        this.normalizeAuditValueMap(change.keyFields),
+        change.sourceValues ?? {},
+        change.targetValues ?? {},
+        ''));
+  }
+
+  private mapSingleAuditChangeToMatrixRow(
+    operationInput: string | undefined,
+    keyFields: Record<string, unknown>,
+    sourceValues: Record<string, unknown>,
+    targetValues: Record<string, unknown>,
+    _fallbackText: string): AuditDetailGridRow {
+    const operationRaw = (operationInput ?? '').toString().trim().toLowerCase();
+    const operation = operationRaw.length > 0
+      ? operationRaw.charAt(0).toUpperCase() + operationRaw.slice(1)
+      : 'Updated';
+
+    const normalizedKeyValues = this.normalizeAuditValueMap(keyFields);
+    const normalizedBefore = this.normalizeAuditValueMap(sourceValues);
+    const normalizedAfter = this.normalizeAuditValueMap(targetValues);
+
+    return {
+      rowKey: `${operation}|${this.formatAuditValues(normalizedKeyValues)}|${this.formatAuditValues(normalizedBefore)}|${this.formatAuditValues(normalizedAfter)}`,
+      operation,
+      keyValues: normalizedKeyValues,
+      beforeValues: normalizedBefore,
+      afterValues: normalizedAfter
+    };
+  }
+
+  private collectAuditColumns(rows: AuditDetailGridRow[], section: 'keyValues' | 'beforeValues' | 'afterValues'): string[] {
+    const columns: string[] = [];
+    for (const row of rows) {
+      for (const key of Object.keys(row[section])) {
+        if (!columns.includes(key)) {
+          columns.push(key);
+        }
+      }
+    }
+
+    return columns;
+  }
+
+  private collectAuditValueColumns(rows: AuditDetailGridRow[]): string[] {
+    const columns: string[] = [];
+
+    for (const row of rows) {
+      for (const key of Object.keys(row.beforeValues)) {
+        if (!columns.includes(key)) {
+          columns.push(key);
+        }
+      }
+
+      for (const key of Object.keys(row.afterValues)) {
+        if (!columns.includes(key)) {
+          columns.push(key);
+        }
+      }
+    }
+
+    return columns;
+  }
+
+  getAuditKeyCellValue(row: AuditDetailGridRow, key: string): string {
+    return row.keyValues[key] ?? '';
+  }
+
+  getAuditBeforeCellValue(row: AuditDetailGridRow, field: string): string {
+    const operation = row.operation.toLowerCase();
+    if (operation === 'added') {
+      return '-';
+    }
+
+    if (this.hasAuditField(row.beforeValues, field)) {
+      if (this.hasAuditField(row.afterValues, field) && row.beforeValues[field] === row.afterValues[field]) {
+        return '';
+      }
+
+      return row.beforeValues[field];
+    }
+
+    if (operation === 'updated' && this.hasAuditField(row.afterValues, field)) {
+      return '-';
+    }
+
+    return operation === 'removed' ? '-' : '';
+  }
+
+  getAuditAfterCellValue(row: AuditDetailGridRow, field: string): string {
+    const operation = row.operation.toLowerCase();
+    if (operation === 'removed') {
+      return '-';
+    }
+
+    if (this.hasAuditField(row.afterValues, field)) {
+      if (this.hasAuditField(row.beforeValues, field) && row.beforeValues[field] === row.afterValues[field]) {
+        return '';
+      }
+
+      return row.afterValues[field];
+    }
+
+    if (operation === 'updated' && this.hasAuditField(row.beforeValues, field)) {
+      return '-';
+    }
+
+    return operation === 'added' ? '-' : '';
+  }
+
+  shouldHighlightAuditBeforeCell(row: AuditDetailGridRow, field: string): boolean {
+    if (row.operation.toLowerCase() !== 'updated') {
+      return false;
+    }
+
+    if (!this.hasAuditField(row.beforeValues, field) && !this.hasAuditField(row.afterValues, field)) {
+      return false;
+    }
+
+    if (this.hasAuditField(row.beforeValues, field)
+      && this.hasAuditField(row.afterValues, field)
+      && row.beforeValues[field] === row.afterValues[field]) {
+      return false;
+    }
+
+    return this.getAuditBeforeCellValue(row, field) !== this.getAuditAfterCellValue(row, field);
+  }
+
+  shouldHighlightAuditAfterCell(row: AuditDetailGridRow, field: string): boolean {
+    return this.shouldHighlightAuditBeforeCell(row, field);
+  }
+
+  getAuditOperationType(row: AuditDetailGridRow): 'updated' | 'added' | 'deleted' {
+    const operation = row.operation.trim().toLowerCase();
+    if (operation === 'added') {
+      return 'added';
+    }
+
+    if (operation === 'removed' || operation === 'deleted') {
+      return 'deleted';
+    }
+
+    return 'updated';
+  }
+
+  getAuditOperationLabel(row: AuditDetailGridRow): string {
+    const operationType = this.getAuditOperationType(row);
+    if (operationType === 'deleted') {
+      return 'Deleted';
+    }
+
+    if (operationType === 'added') {
+      return 'Added';
+    }
+
+    if (row.operation.trim().length === 0) {
+      return 'Updated';
+    }
+
+    return 'Updated';
+  }
+
+  getAuditOperationValue(
+    row: AuditDetailGridRow,
+    field: string,
+    operationType: 'added' | 'deleted'): string {
+    if (operationType === 'added') {
+      if (this.hasAuditField(row.afterValues, field)) {
+        return row.afterValues[field];
+      }
+
+      if (this.hasAuditField(row.beforeValues, field)) {
+        return row.beforeValues[field];
+      }
+
+      return '';
+    }
+
+    if (this.hasAuditField(row.beforeValues, field)) {
+      return row.beforeValues[field];
+    }
+
+    if (this.hasAuditField(row.afterValues, field)) {
+      return row.afterValues[field];
+    }
+
+    return '';
+  }
+
+  private hasAuditField(values: Record<string, string>, key: string): boolean {
+    return Object.prototype.hasOwnProperty.call(values, key);
+  }
+
+  private normalizeAuditValueMap(values: Record<string, unknown> | undefined | null): Record<string, string> {
+    if (!values || typeof values !== 'object') {
+      return {};
+    }
+
+    const normalized: Record<string, string> = {};
+    for (const [key, value] of Object.entries(values)) {
+      normalized[key] = this.formatAuditSingleValue(value);
+    }
+
+    return normalized;
+  }
+
+  private formatAuditValues(values: Record<string, unknown>): string {
+    const pairs = Object.entries(values);
+    if (pairs.length === 0) {
+      return '-';
+    }
+
+    return `{${pairs.map(([key, value]) => `${key}=${this.formatAuditSingleValue(value)}`).join(', ')}}`;
+  }
+
+  private formatAuditSingleValue(value: unknown): string {
+    if (value === undefined || value === null) {
+      return '-';
+    }
+
+    if (typeof value === 'string') {
+      return value.trim().length > 0 ? value : '-';
+    }
+
+    return `${value}`;
+  }
+
   private clearError(): void {
     this.error.set('');
     if (this.errorToastTimer) {
@@ -2300,8 +2806,17 @@ export class App {
 
   private setError(err: { error?: unknown; message?: string }): void {
     const backendError = typeof err.error === 'string' ? err.error : '';
-    this.error.set(backendError || err.message || 'Unexpected error.');
+    const message = backendError || err.message || 'Unexpected error.';
+    this.error.set(message);
     this.status.set('Failed');
+
+    if (this.shouldUseBlockingDialog(message)) {
+      this.blockingDialogTitle.set('Action blocked');
+      this.blockingDialogMessage.set(message);
+      this.blockingDialogVisible.set(true);
+      return;
+    }
+
     if (this.errorToastTimer) {
       clearTimeout(this.errorToastTimer);
     }
@@ -2309,5 +2824,36 @@ export class App {
     this.errorToastTimer = setTimeout(() => {
       this.error.set('');
     }, 4500);
+  }
+
+  confirmBlockingDialog(): void {
+    this.blockingDialogVisible.set(false);
+    this.blockingDialogMessage.set('');
+    this.error.set('');
+  }
+
+  private shouldUseBlockingDialog(message: string): boolean {
+    if (message.length >= 120) {
+      return true;
+    }
+
+    return message.toLowerCase().includes('approval is not permitted');
+  }
+
+  private readSavedTheme(): 'dark' | 'light' {
+    try {
+      const value = globalThis.localStorage?.getItem('dataset-theme');
+      return value === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  }
+
+  private saveTheme(theme: 'dark' | 'light'): void {
+    try {
+      globalThis.localStorage?.setItem('dataset-theme', theme);
+    } catch {
+      // Ignore storage errors in restricted browser contexts.
+    }
   }
 }

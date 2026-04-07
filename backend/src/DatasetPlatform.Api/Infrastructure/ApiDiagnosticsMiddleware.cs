@@ -170,12 +170,44 @@ public sealed class ApiDiagnosticsMiddleware(
         await FileWriteLock.WaitAsync(cancellationToken);
         try
         {
-            await File.AppendAllTextAsync(logPath, entry, cancellationToken);
+            var maxLogRows = _options.MaxLogRows <= 0 ? 1000 : _options.MaxLogRows;
+            await AppendLogEntryWithRetentionAsync(logPath, entry, maxLogRows, cancellationToken);
         }
         finally
         {
             FileWriteLock.Release();
         }
+    }
+
+    private static async Task AppendLogEntryWithRetentionAsync(
+        string logPath,
+        string entry,
+        int maxLogRows,
+        CancellationToken cancellationToken)
+    {
+        var existingLines = File.Exists(logPath)
+            ? await File.ReadAllLinesAsync(logPath, cancellationToken)
+            : Array.Empty<string>();
+
+        var normalizedEntry = entry
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n');
+        var entryLines = normalizedEntry.Split('\n', StringSplitOptions.None);
+        if (entryLines.Length > 0 && entryLines[^1].Length == 0)
+        {
+            entryLines = entryLines[..^1];
+        }
+
+        var retainedLines = existingLines
+            .Concat(entryLines)
+            .TakeLast(maxLogRows)
+            .ToArray();
+
+        var output = retainedLines.Length == 0
+            ? string.Empty
+            : string.Join(Environment.NewLine, retainedLines) + Environment.NewLine;
+
+        await File.WriteAllTextAsync(logPath, output, cancellationToken);
     }
 
     private string ResolveLogPath()

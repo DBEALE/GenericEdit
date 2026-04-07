@@ -66,6 +66,113 @@ public sealed class DatasetServiceTests
     }
 
     [Fact]
+    public async Task Signoff_ShouldRejectWhenApproverModifiedInstanceSinceLastApprovedVersion()
+    {
+        var repository = new InMemoryRepository();
+        var service = new DatasetService(repository);
+        var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
+        await service.UpsertSchemaAsync(
+            CreateSchema(
+                "FX_RATES",
+                read: ["viewer", "writer", "approver"],
+                write: ["writer", "approver"],
+                signoff: ["approver"]),
+            admin,
+            CancellationToken.None);
+
+        var writer = CreateUser("writer", "writer");
+        var created = await service.CreateInstanceAsync(new CreateDatasetInstanceRequest
+        {
+            DatasetKey = "FX_RATES",
+            AsOfDate = new DateOnly(2026, 4, 3),
+            State = "Draft",
+            Header = new Dictionary<string, object?> { ["book"] = "LON" },
+            Rows = [new Dictionary<string, object?> { ["currency"] = "USD", ["rate"] = "1.24" }]
+        }, writer, CancellationToken.None);
+
+        var approver = CreateUser("approver", "approver", "writer");
+        await service.SignoffInstanceAsync(new SignoffDatasetRequest
+        {
+            DatasetKey = "FX_RATES",
+            InstanceId = created.Id
+        }, approver, CancellationToken.None);
+
+        await service.UpdateInstanceAsync(new UpdateDatasetInstanceRequest
+        {
+            DatasetKey = "FX_RATES",
+            InstanceId = created.Id,
+            AsOfDate = created.AsOfDate,
+            State = "Draft",
+            Header = new Dictionary<string, object?> { ["book"] = "LON" },
+            Rows = [new Dictionary<string, object?> { ["currency"] = "USD", ["rate"] = "1.31" }]
+        }, approver, CancellationToken.None);
+
+        var ex = await Assert.ThrowsAsync<DatasetServiceException>(() =>
+            service.SignoffInstanceAsync(new SignoffDatasetRequest
+            {
+                DatasetKey = "FX_RATES",
+                InstanceId = created.Id
+            }, approver, CancellationToken.None));
+
+        Assert.Contains("Approval is not permitted", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1 change", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("approver", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Signoff_ShouldAllowWhenApproverDidNotModifySinceLastApprovedVersion()
+    {
+        var repository = new InMemoryRepository();
+        var service = new DatasetService(repository);
+        var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
+        await service.UpsertSchemaAsync(
+            CreateSchema(
+                "FX_RATES",
+                read: ["viewer", "writer", "approver"],
+                write: ["writer"],
+                signoff: ["approver"]),
+            admin,
+            CancellationToken.None);
+
+        var writer = CreateUser("writer", "writer");
+        var created = await service.CreateInstanceAsync(new CreateDatasetInstanceRequest
+        {
+            DatasetKey = "FX_RATES",
+            AsOfDate = new DateOnly(2026, 4, 3),
+            State = "Draft",
+            Header = new Dictionary<string, object?> { ["book"] = "LON" },
+            Rows = [new Dictionary<string, object?> { ["currency"] = "USD", ["rate"] = "1.24" }]
+        }, writer, CancellationToken.None);
+
+        var approver = CreateUser("approver", "approver");
+        var firstSignoff = await service.SignoffInstanceAsync(new SignoffDatasetRequest
+        {
+            DatasetKey = "FX_RATES",
+            InstanceId = created.Id
+        }, approver, CancellationToken.None);
+
+        await service.UpdateInstanceAsync(new UpdateDatasetInstanceRequest
+        {
+            DatasetKey = "FX_RATES",
+            InstanceId = created.Id,
+            AsOfDate = created.AsOfDate,
+            State = "Draft",
+            Header = new Dictionary<string, object?> { ["book"] = "LON" },
+            Rows = [new Dictionary<string, object?> { ["currency"] = "USD", ["rate"] = "1.31" }]
+        }, writer, CancellationToken.None);
+
+        var secondSignoff = await service.SignoffInstanceAsync(new SignoffDatasetRequest
+        {
+            DatasetKey = "FX_RATES",
+            InstanceId = created.Id
+        }, approver, CancellationToken.None);
+
+        Assert.Equal("Official", firstSignoff.State);
+        Assert.Equal("Official", secondSignoff.State);
+        Assert.Equal("approver", secondSignoff.LastModifiedBy);
+    }
+
+    [Fact]
     public async Task CreateInstance_ShouldValidateRequiredFields()
     {
         var repository = new InMemoryRepository();
@@ -334,14 +441,14 @@ public sealed class DatasetServiceTests
         var audit = await service.GetAuditAsync(admin, CancellationToken.None);
         var updateEvent = audit.Last(x => x.Action == "INSTANCE_UPDATE");
 
-        Assert.Contains("Changes", updateEvent.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("updated row [currency=USD]", updateEvent.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("removed row [currency=EUR]", updateEvent.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("removed row [currency=EUR] {rate=1.11}", updateEvent.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("rate 1.24 -> 1.31", updateEvent.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Header: before=", updateEvent.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Header changes:", updateEvent.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("book LON -> NYC", updateEvent.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, updateEvent.RowChanges.Count);
+        var updatedUsd = updateEvent.RowChanges.Single(x => x.Operation == "updated" && x.KeyFields["currency"] == "USD");
+        var removedEur = updateEvent.RowChanges.Single(x => x.Operation == "removed" && x.KeyFields["currency"] == "EUR");
+
+        Assert.Equal("1.24", updatedUsd.SourceValues!["rate"]);
+        Assert.Equal("1.31", updatedUsd.TargetValues!["rate"]);
+        Assert.Equal("1.11", removedEur.SourceValues!["rate"]);
+        Assert.Null(removedEur.TargetValues);
     }
 
     [Fact]
@@ -369,10 +476,9 @@ public sealed class DatasetServiceTests
         var audit = await service.GetAuditAsync(admin, CancellationToken.None);
         var createEvent = audit.Last(x => x.Action == "INSTANCE_CREATE");
 
-        Assert.Contains("Detail rows (2)", createEvent.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Header: {book=LON}", createEvent.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("row [currency=USD] added", createEvent.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("row [currency=EUR] added", createEvent.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, createEvent.RowChanges.Count);
+        Assert.Contains(createEvent.RowChanges, x => x.Operation == "added" && x.KeyFields["currency"] == "USD");
+        Assert.Contains(createEvent.RowChanges, x => x.Operation == "added" && x.KeyFields["currency"] == "EUR");
     }
 
     [Fact]
@@ -407,8 +513,8 @@ public sealed class DatasetServiceTests
         var createEvent = audit.Last(x => x.Action == "INSTANCE_CREATE");
         var updateEvent = audit.Last(x => x.Action == "INSTANCE_UPDATE");
 
-        Assert.Contains("Row data was not audited because no key fields were defined", createEvent.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Row data was not audited because no key fields were defined", updateEvent.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(createEvent.RowChanges);
+        Assert.Empty(updateEvent.RowChanges);
     }
 
     [Fact]
@@ -442,8 +548,7 @@ public sealed class DatasetServiceTests
         var audit = await service.GetAuditAsync(admin, CancellationToken.None);
         var updateEvent = audit.Last(x => x.Action == "INSTANCE_UPDATE");
 
-        Assert.Contains("Lifecycle changes:", updateEvent.Details, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("state Draft -> Scenario Testing", updateEvent.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(updateEvent.RowChanges);
     }
 
     [Fact]

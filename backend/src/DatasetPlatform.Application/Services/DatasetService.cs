@@ -12,6 +12,9 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
 {
     private readonly ILogger<DatasetService> logger = logger ?? NullLogger<DatasetService>.Instance;
     private const string OfficialState = "Official";
+    private const string InstanceCreateAction = "INSTANCE_CREATE";
+    private const string InstanceUpdateAction = "INSTANCE_UPDATE";
+    private const string InstanceSignoffAction = "INSTANCE_SIGNOFF";
 
     public async Task<IReadOnlyList<DatasetSchema>> GetAccessibleSchemasAsync(UserContext user, CancellationToken cancellationToken)
     {
@@ -59,7 +62,7 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
         };
 
         await repository.UpsertSchemaAsync(normalizedSchema, cancellationToken);
-        await AddAuditAsync(user, "SCHEMA_UPSERT", normalizedSchema.Key, null, $"Schema {normalizedSchema.Key} was created or updated.", cancellationToken);
+        await AddAuditAsync(user, "SCHEMA_UPSERT", normalizedSchema.Key, null, cancellationToken);
         return normalizedSchema;
     }
 
@@ -70,7 +73,7 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
         EnsureAuthorized(DatasetAuthorizer.CanMaintainSchema(schema, user), "User is not authorized to maintain this dataset schema.");
 
         await repository.DeleteSchemaAsync(key, cancellationToken);
-        await AddAuditAsync(user, "SCHEMA_DELETE", key, null, "Schema deleted.", cancellationToken);
+        await AddAuditAsync(user, "SCHEMA_DELETE", key, null, cancellationToken);
     }
 
     public async Task<IReadOnlyList<DatasetInstance>> GetInstancesAsync(
@@ -491,8 +494,8 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
             };
 
             await repository.SaveInstanceAsync(instance, cancellationToken);
-            var createDetails = BuildCreateAuditDetails(instance, schema);
-            await AddAuditAsync(user, "INSTANCE_CREATE", key, instance.Id, createDetails, cancellationToken);
+            var createRowChanges = BuildCreateAuditRowChanges(instance, schema);
+            await AddAuditAsync(user, "INSTANCE_CREATE", key, instance.Id, cancellationToken, createRowChanges);
             return instance;
         }
         catch (DatasetServiceException ex)
@@ -581,8 +584,8 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
             };
 
             await repository.ReplaceInstanceAsync(updated, cancellationToken);
-            var updateDetails = BuildUpdateAuditDetails(existing, updated, schema);
-            await AddAuditAsync(user, "INSTANCE_UPDATE", key, updated.Id, updateDetails, cancellationToken);
+            var updateRowChanges = BuildUpdateAuditRowChanges(existing, updated, schema);
+            await AddAuditAsync(user, "INSTANCE_UPDATE", key, updated.Id, cancellationToken, updateRowChanges);
             return updated;
         }
         catch (DatasetServiceException ex)
@@ -626,7 +629,7 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
             throw new DatasetServiceException("Dataset instance was not found.", DatasetServiceErrorCode.NotFound);
         }
 
-        await AddAuditAsync(user, "INSTANCE_DELETE", key, instanceId, $"Deleted instance {instanceId}.", cancellationToken);
+        await AddAuditAsync(user, "INSTANCE_DELETE", key, instanceId, cancellationToken);
     }
 
     public async Task<DatasetInstance> SignoffInstanceAsync(SignoffDatasetRequest request, UserContext user, CancellationToken cancellationToken)
@@ -649,6 +652,8 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
                     $"Conflict: instance was modified by another user (expected version {request.ExpectedVersion.Value}, current version {existing.Version}). Refresh and retry.",
                     DatasetServiceErrorCode.Conflict);
             }
+
+            await EnsureApproverDidNotModifyInstanceSinceLastSignoffAsync(key, existing.Id, user.UserId, cancellationToken);
 
             // Only load headers for the target (asOfDate, Official) — no detail rows needed.
             var instances = await repository.GetInstancesAsync(
@@ -675,7 +680,7 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
             };
 
             await repository.ReplaceInstanceAsync(official, cancellationToken);
-            await AddAuditAsync(user, "INSTANCE_SIGNOFF", key, official.Id, $"Instance {existing.Id} was signed off in place as official.", cancellationToken);
+            await AddAuditAsync(user, InstanceSignoffAction, key, official.Id, cancellationToken);
             return official;
         }
         catch (DatasetServiceException ex)
@@ -736,7 +741,13 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
         return await ResolveLookupPermissibleValuesAsync(normalizedLookupKey, cancellationToken);
     }
 
-    private async Task AddAuditAsync(UserContext user, string action, string datasetKey, Guid? instanceId, string details, CancellationToken cancellationToken)
+    private async Task AddAuditAsync(
+        UserContext user,
+        string action,
+        string datasetKey,
+        Guid? instanceId,
+        CancellationToken cancellationToken,
+        IReadOnlyList<AuditRowChange>? rowChanges = null)
     {
         var normalizedUser = string.IsNullOrWhiteSpace(user.UserId) ? "unknown" : user.UserId.Trim();
         await repository.AddAuditEventAsync(new AuditEvent
@@ -747,8 +758,56 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
             Action = action,
             DatasetKey = datasetKey,
             DatasetInstanceId = instanceId,
-            Details = details
+            RowChanges = rowChanges ?? new List<AuditRowChange>()
         }, cancellationToken);
+    }
+
+    private async Task EnsureApproverDidNotModifyInstanceSinceLastSignoffAsync(
+        string datasetKey,
+        Guid instanceId,
+        string approverUserId,
+        CancellationToken cancellationToken)
+    {
+        var auditEvents = await repository.GetAuditEventsAsync(datasetKey, cancellationToken);
+        var instanceAudit = auditEvents
+            .Where(x => x.DatasetInstanceId == instanceId)
+            .ToList();
+
+        var lastSignoffAtUtc = instanceAudit
+            .Where(x => string.Equals(x.Action, InstanceSignoffAction, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(x => x.OccurredAtUtc)
+            .Select(x => (DateTimeOffset?)x.OccurredAtUtc)
+            .FirstOrDefault();
+
+        var contributorsSinceLastSignoff = instanceAudit
+            .Where(x =>
+                (string.Equals(x.Action, InstanceCreateAction, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(x.Action, InstanceUpdateAction, StringComparison.OrdinalIgnoreCase))
+                && (!lastSignoffAtUtc.HasValue || x.OccurredAtUtc > lastSignoffAtUtc.Value))
+            .Select(x => x.UserId?.Trim() ?? string.Empty)
+            .Where(x => x.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var approverChangeCount = instanceAudit.Count(x =>
+            (string.Equals(x.Action, InstanceCreateAction, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(x.Action, InstanceUpdateAction, StringComparison.OrdinalIgnoreCase))
+            && (!lastSignoffAtUtc.HasValue || x.OccurredAtUtc > lastSignoffAtUtc.Value)
+            && string.Equals(x.UserId?.Trim(), approverUserId.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        var normalizedApprover = approverUserId.Trim();
+        if (!contributorsSinceLastSignoff.Contains(normalizedApprover, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var changeWord = approverChangeCount == 1 ? "change" : "changes";
+
+        throw new DatasetServiceException(
+            $"Approval is not permitted for '{normalizedApprover}' because {approverChangeCount} {changeWord} were made by this user "
+            + "since the last approved version. "
+            + $"Contributors since last approval: {string.Join(", ", contributorsSinceLastSignoff)}.");
     }
 
     private static string BuildCreateAuditDetails(DatasetInstance instance, DatasetSchema schema)
@@ -906,6 +965,90 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
         return lines;
     }
 
+    private static List<AuditRowChange> BuildCreateAuditRowChanges(DatasetInstance instance, DatasetSchema schema)
+    {
+        var keyFields = GetDetailKeyFields(schema);
+        if (keyFields.Count == 0)
+        {
+            return new List<AuditRowChange>();
+        }
+
+        return instance.Rows.Select(row => new AuditRowChange
+        {
+            Operation = "added",
+            KeyFields = BuildAuditValueMap(row, keyFields),
+            TargetValues = BuildNonKeyAuditValueMap(row, keyFields)
+        }).ToList();
+    }
+
+    private static List<AuditRowChange> BuildUpdateAuditRowChanges(DatasetInstance existing, DatasetInstance updated, DatasetSchema schema)
+    {
+        var keyFields = GetDetailKeyFields(schema);
+        if (keyFields.Count == 0)
+        {
+            return new List<AuditRowChange>();
+        }
+
+        var beforeByKey = existing.Rows.ToDictionary(
+            row => BuildRowKey(row, keyFields),
+            row => row,
+            StringComparer.OrdinalIgnoreCase);
+
+        var afterByKey = updated.Rows.ToDictionary(
+            row => BuildRowKey(row, keyFields),
+            row => row,
+            StringComparer.OrdinalIgnoreCase);
+
+        var allKeys = beforeByKey.Keys
+            .Concat(afterByKey.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var rowChanges = new List<AuditRowChange>();
+
+        foreach (var rowKey in allKeys)
+        {
+            var hasBefore = beforeByKey.TryGetValue(rowKey, out var beforeRow);
+            var hasAfter = afterByKey.TryGetValue(rowKey, out var afterRow);
+
+            if (!hasBefore && hasAfter)
+            {
+                rowChanges.Add(new AuditRowChange
+                {
+                    Operation = "added",
+                    KeyFields = BuildAuditValueMap(afterRow!, keyFields),
+                    TargetValues = BuildNonKeyAuditValueMap(afterRow!, keyFields)
+                });
+                continue;
+            }
+
+            if (hasBefore && !hasAfter)
+            {
+                rowChanges.Add(new AuditRowChange
+                {
+                    Operation = "removed",
+                    KeyFields = BuildAuditValueMap(beforeRow!, keyFields),
+                    SourceValues = BuildNonKeyAuditValueMap(beforeRow!, keyFields)
+                });
+                continue;
+            }
+
+            if (hasBefore && hasAfter && !RowsEqual(beforeRow!, afterRow!))
+            {
+                rowChanges.Add(new AuditRowChange
+                {
+                    Operation = "updated",
+                    KeyFields = BuildAuditValueMap(afterRow!, keyFields),
+                    SourceValues = BuildNonKeyAuditValueMap(beforeRow!, keyFields),
+                    TargetValues = BuildNonKeyAuditValueMap(afterRow!, keyFields)
+                });
+            }
+        }
+
+        return rowChanges;
+    }
+
     private static IReadOnlyList<string> GetDetailKeyFields(DatasetSchema schema)
     {
         return schema.DetailFields
@@ -926,6 +1069,29 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
         });
 
         return string.Join(", ", parts);
+    }
+
+    private static IDictionary<string, string> BuildAuditValueMap(IDictionary<string, object?> row, IReadOnlyList<string> fields)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in fields)
+        {
+            row.TryGetValue(field, out var value);
+            map[field] = FormatValueForAudit(value);
+        }
+
+        return map;
+    }
+
+    private static IDictionary<string, string> BuildNonKeyAuditValueMap(IDictionary<string, object?> row, IReadOnlyList<string> keyFields)
+    {
+        return row
+            .Where(x => !keyFields.Contains(x.Key, StringComparer.OrdinalIgnoreCase))
+            .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                x => x.Key,
+                x => FormatValueForAudit(x.Value),
+                StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool RowsEqual(IDictionary<string, object?> left, IDictionary<string, object?> right)
