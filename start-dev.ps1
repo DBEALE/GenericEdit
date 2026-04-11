@@ -7,7 +7,16 @@ $pidFilePath = Join-Path $root ".dev-processes.json"
 # Always begin with a clean restart to avoid duplicate server instances.
 & (Join-Path $root "stop-dev.ps1") | Out-Null
 
-$backendProcess = Start-Process -FilePath "dotnet" -ArgumentList "run" -WorkingDirectory $backendPath -PassThru -WindowStyle Hidden
+# Build before starting so --no-build is guaranteed to find up-to-date binaries.
+Write-Host "Building backend..."
+$buildResult = & dotnet build $backendPath --no-restore 2>&1
+if ($LASTEXITCODE -ne 0) {
+	Write-Error "Backend build failed. Aborting start."
+	Write-Host $buildResult
+	exit 1
+}
+
+$backendProcess = Start-Process -FilePath "dotnet" -ArgumentList "run", "--no-build" -WorkingDirectory $backendPath -PassThru -WindowStyle Hidden
 Start-Sleep -Seconds 1
 $frontendProcess = Start-Process -FilePath "npm.cmd" -ArgumentList "start", "--", "--port", "4300" -WorkingDirectory $frontendPath -PassThru -WindowStyle Hidden
 

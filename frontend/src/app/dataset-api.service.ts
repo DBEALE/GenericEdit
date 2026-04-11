@@ -256,10 +256,13 @@ export class DatasetApiService {
     });
   }
 
-  getAudit(userId: string, roles: string[], datasetKey?: string): Observable<AuditEvent[]> {
+  getAudit(userId: string, roles: string[], datasetKey?: string, instanceId?: string): Observable<AuditEvent[]> {
     let params = new HttpParams();
     if (datasetKey && datasetKey.trim().length > 0) {
       params = params.set('datasetKey', datasetKey.trim());
+    }
+    if (instanceId && instanceId.trim().length > 0) {
+      params = params.set('instanceId', instanceId.trim());
     }
 
     return this.http.get<AuditEvent[]>(`${this.baseUrl}/audit`, {

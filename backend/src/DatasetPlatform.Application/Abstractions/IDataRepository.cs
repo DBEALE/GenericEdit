@@ -60,14 +60,30 @@ public interface IDataRepository
     /// <summary>Returns a single instance by its GUID, or <c>null</c> if not found.</summary>
     Task<DatasetInstance?> GetInstanceAsync(string datasetKey, Guid instanceId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Returns the most recent instance for <paramref name="datasetKey"/> in the given <paramref name="state"/>
+    /// (highest <see cref="DatasetInstance.AsOfDate"/>, then highest <see cref="DatasetInstance.Version"/>),
+    /// or <c>null</c> if none exists. Always includes full detail rows.
+    /// </summary>
+    Task<DatasetInstance?> GetLatestInstanceAsync(string datasetKey, string state, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns the ID and version of the most recent instance for <paramref name="datasetKey"/> in the given <paramref name="state"/>,
+    /// or <c>null</c> if none exists. Reads only the winning header file — suitable for cache-staleness checks.
+    /// </summary>
+    Task<(Guid Id, int Version)?> GetLatestInstanceVersionAsync(string datasetKey, string state, CancellationToken cancellationToken);
+
     /// <summary>Unconditionally writes (creates or overwrites) the given instance.</summary>
     Task SaveInstanceAsync(DatasetInstance instance, CancellationToken cancellationToken);
 
     /// <summary>
     /// Replaces an existing instance. Returns <c>false</c> (and makes no changes) if
     /// no instance with the same ID already exists — preventing unintentional creates.
+    /// When <paramref name="existing"/> is supplied the implementation may skip the existence
+    /// check and use the known previous state/date to compute the old header path directly,
+    /// avoiding redundant blob queries.
     /// </summary>
-    Task<bool> ReplaceInstanceAsync(DatasetInstance instance, CancellationToken cancellationToken);
+    Task<bool> ReplaceInstanceAsync(DatasetInstance instance, CancellationToken cancellationToken, DatasetInstance? existing = null);
 
     /// <summary>
     /// Deletes the instance with the given ID. Returns <c>false</c> if the instance was not found.
@@ -82,6 +98,12 @@ public interface IDataRepository
     /// Results are ordered by <see cref="AuditEvent.OccurredAtUtc"/> descending.
     /// </summary>
     Task<IReadOnlyList<AuditEvent>> GetAuditEventsAsync(string? datasetKey, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns audit events for a specific instance, newest first, stopping after the most recent signoff.
+    /// Only reads files in the instance's own audit subfolder — far cheaper than loading the full dataset audit.
+    /// </summary>
+    Task<IReadOnlyList<AuditEvent>> GetInstanceAuditHistoryAsync(string datasetKey, Guid instanceId, CancellationToken cancellationToken);
 
     /// <summary>Appends a single audit event to the store. Events are immutable once written.</summary>
     Task AddAuditEventAsync(AuditEvent auditEvent, CancellationToken cancellationToken);

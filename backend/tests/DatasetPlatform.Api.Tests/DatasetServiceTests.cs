@@ -11,7 +11,7 @@ public sealed class DatasetServiceTests
     public async Task CreateInstance_ShouldRejectOfficialState()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
 
@@ -33,7 +33,7 @@ public sealed class DatasetServiceTests
     public async Task Signoff_ShouldUpdateLoadedInstanceToOfficial()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
 
@@ -69,7 +69,7 @@ public sealed class DatasetServiceTests
     public async Task Signoff_ShouldRejectWhenApproverModifiedInstanceSinceLastApprovedVersion()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(
             CreateSchema(
@@ -123,7 +123,7 @@ public sealed class DatasetServiceTests
     public async Task Signoff_ShouldAllowWhenApproverDidNotModifySinceLastApprovedVersion()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(
             CreateSchema(
@@ -176,7 +176,7 @@ public sealed class DatasetServiceTests
     public async Task CreateInstance_ShouldValidateRequiredFields()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
 
@@ -198,7 +198,7 @@ public sealed class DatasetServiceTests
     public async Task GetAccessibleSchemas_ShouldOnlyReturnAuthorizedDatasets()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
 
         await service.UpsertSchemaAsync(CreateSchema("FX_RATES", read: ["viewer"]), admin, CancellationToken.None);
@@ -215,7 +215,7 @@ public sealed class DatasetServiceTests
     public async Task GetAccessibleSchemas_ShouldAllowRoleBasedReadPermission()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
 
         await service.UpsertSchemaAsync(CreateSchema("FX_RATES", read: ["DatasetReaderRole"]), admin, CancellationToken.None);
@@ -232,7 +232,7 @@ public sealed class DatasetServiceTests
     public async Task GetAudit_WithReadRoleForDataset_ShouldReturnDatasetAudit()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
 
         await service.UpsertSchemaAsync(CreateSchema("FX_RATES", read: ["viewer"], write: ["writer"], signoff: ["approver"]), admin, CancellationToken.None);
@@ -258,7 +258,7 @@ public sealed class DatasetServiceTests
     public async Task DatasetScopedAdminRole_ShouldAllowSchemaUpdateForThatDatasetOnly()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
 
         await service.UpsertSchemaAsync(
@@ -296,7 +296,7 @@ public sealed class DatasetServiceTests
     public async Task DatasetScopedAdminRole_ShouldNotAllowSchemaUpdateForOtherDatasets()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
 
         await service.UpsertSchemaAsync(
@@ -319,7 +319,7 @@ public sealed class DatasetServiceTests
     public async Task RoleBasedWriteAndSignoffPermissions_ShouldEnforceExpectedBoundaries()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
 
         await service.UpsertSchemaAsync(
@@ -368,7 +368,7 @@ public sealed class DatasetServiceTests
     public async Task UpdateInstance_ShouldReplaceLoadedInstance()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
 
@@ -407,7 +407,7 @@ public sealed class DatasetServiceTests
     public async Task UpdateInstance_AuditShouldIncludeChangedRows()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
 
@@ -455,7 +455,7 @@ public sealed class DatasetServiceTests
     public async Task CreateInstance_AuditShouldIncludeAllSavedRows()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
 
@@ -485,7 +485,7 @@ public sealed class DatasetServiceTests
     public async Task UpdateInstance_AuditShouldNoteRowsNotAuditedWhenNoKeyFieldsDefined()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(withKeyFields: false), admin, CancellationToken.None);
 
@@ -521,7 +521,7 @@ public sealed class DatasetServiceTests
     public async Task UpdateInstance_AuditShouldIncludeStateChange_WhenOnlyStateChanges()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
 
@@ -555,7 +555,7 @@ public sealed class DatasetServiceTests
     public async Task CreateInstance_WithResetVersion_ShouldRejectDuplicateHeader()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
 
@@ -590,7 +590,7 @@ public sealed class DatasetServiceTests
     public async Task CreateInstance_ShouldRejectDuplicateHeaderForSameAsOfDateAndState()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
 
@@ -623,7 +623,7 @@ public sealed class DatasetServiceTests
     public async Task UpdateInstance_ShouldRejectWhenBecomingDuplicateHeader()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
 
@@ -661,69 +661,10 @@ public sealed class DatasetServiceTests
     }
 
     [Fact]
-    public async Task UpdateInstance_ShouldAllowSavingSameRecordWhenLegacyDuplicateExists()
-    {
-        var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
-        var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
-        await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
-
-        var writer = CreateUser("writer");
-        var baseAsOfDate = new DateOnly(2026, 4, 3);
-        var baseState = "Draft";
-        var baseHeader = new Dictionary<string, object?> { ["book"] = "LON" };
-
-        var targetId = Guid.NewGuid();
-        await repository.SaveInstanceAsync(new DatasetInstance
-        {
-            Id = targetId,
-            DatasetKey = "FX_RATES",
-            AsOfDate = baseAsOfDate,
-            State = baseState,
-            Version = 1,
-            Header = new Dictionary<string, object?>(baseHeader, StringComparer.OrdinalIgnoreCase),
-            Rows = [new Dictionary<string, object?> { ["currency"] = "USD", ["rate"] = "1.24" }],
-            CreatedBy = "writer",
-            CreatedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-10),
-            LastModifiedBy = "writer",
-            LastModifiedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-10)
-        }, CancellationToken.None);
-
-        await repository.SaveInstanceAsync(new DatasetInstance
-        {
-            Id = Guid.NewGuid(),
-            DatasetKey = "FX_RATES",
-            AsOfDate = baseAsOfDate,
-            State = baseState,
-            Version = 1,
-            Header = new Dictionary<string, object?>(baseHeader, StringComparer.OrdinalIgnoreCase),
-            Rows = [new Dictionary<string, object?> { ["currency"] = "EUR", ["rate"] = "1.11" }],
-            CreatedBy = "writer",
-            CreatedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-9),
-            LastModifiedBy = "writer",
-            LastModifiedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-9)
-        }, CancellationToken.None);
-
-        var updated = await service.UpdateInstanceAsync(new UpdateDatasetInstanceRequest
-        {
-            DatasetKey = "FX_RATES",
-            InstanceId = targetId,
-            AsOfDate = baseAsOfDate,
-            State = baseState,
-            Header = new Dictionary<string, object?> { ["book"] = "LON" },
-            Rows = [new Dictionary<string, object?> { ["currency"] = "USD", ["rate"] = "1.30" }]
-        }, writer, CancellationToken.None);
-
-        Assert.Equal(targetId, updated.Id);
-        Assert.Equal(2, updated.Version);
-        Assert.Equal("1.30", updated.Rows[0]["rate"]?.ToString());
-    }
-
-    [Fact]
     public async Task GetInstances_WithMinAndMaxAsOfDate_ShouldReturnOnlyRangeMatches()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
 
@@ -773,7 +714,7 @@ public sealed class DatasetServiceTests
     public async Task CreateInstance_ShouldRejectDuplicateDetailRowsByConfiguredKeyFields()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
         await service.UpsertSchemaAsync(CreateSchema(), admin, CancellationToken.None);
 
@@ -799,7 +740,7 @@ public sealed class DatasetServiceTests
     public async Task CreateInstance_WithLookupField_ShouldAllowValuesFromLatestOfficialLookupDataset()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
 
         await service.UpsertSchemaAsync(CreateLookupSourceSchema(), admin, CancellationToken.None);
@@ -841,7 +782,7 @@ public sealed class DatasetServiceTests
     public async Task CreateInstance_WithLookupField_ShouldAllowWhenWriterHasNoReadRoleOnLookupDataset()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
 
         await service.UpsertSchemaAsync(CreateLookupSourceSchema(read: ["LookupReader"]), admin, CancellationToken.None);
@@ -883,7 +824,7 @@ public sealed class DatasetServiceTests
     public async Task CreateInstance_WithLookupField_ShouldRejectValuesNotInLookupDataset()
     {
         var repository = new InMemoryRepository();
-        var service = new DatasetService(repository);
+        var service = new DatasetService(repository, new LookupValueCache());
         var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
 
         await service.UpsertSchemaAsync(CreateLookupSourceSchema(), admin, CancellationToken.None);
@@ -1197,7 +1138,7 @@ public sealed class DatasetServiceTests
             return Task.CompletedTask;
         }
 
-        public Task<bool> ReplaceInstanceAsync(DatasetInstance instance, CancellationToken cancellationToken)
+        public Task<bool> ReplaceInstanceAsync(DatasetInstance instance, CancellationToken cancellationToken, DatasetInstance? existing = null)
         {
             var index = _instances.FindIndex(x =>
                 string.Equals(x.DatasetKey, instance.DatasetKey, StringComparison.OrdinalIgnoreCase) &&
@@ -1228,6 +1169,48 @@ public sealed class DatasetServiceTests
                 : _audit.Where(x => string.Equals(x.DatasetKey, datasetKey, StringComparison.OrdinalIgnoreCase)).ToList();
 
             return Task.FromResult<IReadOnlyList<AuditEvent>>(filtered.ToList());
+        }
+
+        public Task<(Guid Id, int Version)?> GetLatestInstanceVersionAsync(string datasetKey, string state, CancellationToken cancellationToken)
+        {
+            var result = _instances
+                .Where(x => string.Equals(x.DatasetKey, datasetKey, StringComparison.OrdinalIgnoreCase)
+                         && string.Equals(CanonicalToken(x.State.ToString()), CanonicalToken(state), StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(x => x.AsOfDate)
+                .ThenByDescending(x => x.Version)
+                .Select(x => ((Guid Id, int Version)?)(x.Id, x.Version))
+                .FirstOrDefault();
+            return Task.FromResult(result);
+        }
+
+        public Task<DatasetInstance?> GetLatestInstanceAsync(string datasetKey, string state, CancellationToken cancellationToken)
+        {
+            var result = _instances
+                .Where(x => string.Equals(x.DatasetKey, datasetKey, StringComparison.OrdinalIgnoreCase)
+                         && string.Equals(CanonicalToken(x.State.ToString()), CanonicalToken(state), StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(x => x.AsOfDate)
+                .ThenByDescending(x => x.Version)
+                .FirstOrDefault();
+            return Task.FromResult(result);
+        }
+
+        public Task<IReadOnlyList<AuditEvent>> GetInstanceAuditHistoryAsync(string datasetKey, Guid instanceId, CancellationToken cancellationToken)
+        {
+            var events = _audit
+                .Where(x => string.Equals(x.DatasetKey, datasetKey, StringComparison.OrdinalIgnoreCase)
+                         && x.DatasetInstanceId == instanceId)
+                .OrderByDescending(x => x.OccurredAtUtc)
+                .ToList();
+
+            // Mirror the stop-at-first-signoff behaviour of BlobDataRepository.
+            var result = new List<AuditEvent>();
+            foreach (var e in events)
+            {
+                result.Add(e);
+                if (string.Equals(e.Action, "INSTANCE_SIGNOFF", StringComparison.OrdinalIgnoreCase))
+                    break;
+            }
+            return Task.FromResult<IReadOnlyList<AuditEvent>>(result);
         }
 
         public Task AddAuditEventAsync(AuditEvent auditEvent, CancellationToken cancellationToken)

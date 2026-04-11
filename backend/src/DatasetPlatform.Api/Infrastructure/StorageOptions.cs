@@ -32,6 +32,13 @@ public sealed class StorageOptions
 
     /// <summary>S3-specific configuration. Only used when <see cref="Provider"/> is <see cref="StorageProviders.S3"/>.</summary>
     public S3StorageOptions S3 { get; init; } = new();
+
+    /// <summary>
+    /// Artificial delay added to every blob store operation, in milliseconds.
+    /// Useful in development to simulate network latency and expose inefficient access patterns.
+    /// Set to 0 (default) to disable.
+    /// </summary>
+    public int SimulatedLatencyMs { get; init; }
 }
 
 /// <summary>Named constants for the supported storage providers.</summary>

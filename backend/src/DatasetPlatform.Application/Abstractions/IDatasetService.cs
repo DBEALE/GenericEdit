@@ -130,7 +130,7 @@ public interface IDatasetService
     /// DatasetAdmin users can request all events or filter by dataset key.
     /// Non-admin users must specify a dataset key and must have read access to that dataset.
     /// </summary>
-    Task<IReadOnlyList<AuditEvent>> GetAuditAsync(UserContext user, CancellationToken cancellationToken, string? datasetKey = null);
+    Task<IReadOnlyList<AuditEvent>> GetAuditAsync(UserContext user, CancellationToken cancellationToken, string? datasetKey = null, Guid? instanceId = null);
 
     /// <summary>
     /// Returns the set of permissible values for a Lookup field that references <paramref name="lookupDatasetKey"/>.

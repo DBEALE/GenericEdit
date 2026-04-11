@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(powershell -Command \"Get-Process -Name dotnet -ErrorAction SilentlyContinue | Select-Object Id, CPU, StartTime | Format-Table -AutoSize\")",
+      "Bash(powershell -Command \"Stop-Process -Id 19808 -Force\")",
+      "Bash(powershell -ExecutionPolicy Bypass -File stop-dev.ps1)",
+      "Bash(powershell -ExecutionPolicy Bypass -File start-dev.ps1)",
+      "Bash(powershell -Command \"Get-Process -Name dotnet -ErrorAction SilentlyContinue | Select-Object Id, StartTime | Format-Table -AutoSize\")",
+      "Bash(powershell -Command \"Get-Process -Name dotnet -ErrorAction SilentlyContinue | Stop-Process -Force\")",
+      "Bash(powershell -Command \"Get-ChildItem 'c:\\\\Users\\\\Admin\\\\Documents\\\\vsCode\\\\git\\\\GenericEdit\\\\backend\\\\src\\\\DatasetPlatform.Api\\\\bin\\\\Debug\\\\net10.0\\\\DatasetPlatform.*.dll' | Select-Object Name, LastWriteTime | Format-Table -AutoSize\")",
+      "Bash(powershell -Command \"Select-String -Path 'c:\\\\Users\\\\Admin\\\\Documents\\\\vsCode\\\\git\\\\GenericEdit\\\\backend\\\\src\\\\DatasetPlatform.Application\\\\bin\\\\Debug\\\\net10.0\\\\DatasetPlatform.Application.dll' -Pattern 'GetInstanceAuditHistory' -Encoding Byte -List | Select-Object -ExpandProperty Matches | Select-Object -ExpandProperty Value\")",
+      "Bash(powershell -Command ':*)",
+      "Bash(powershell -Command \"Select-String -Path 'c:\\\\Users\\\\Admin\\\\Documents\\\\vsCode\\\\git\\\\GenericEdit\\\\backend\\\\src\\\\DatasetPlatform.Application\\\\Services\\\\DatasetService.cs' -Pattern 'GetInstanceAuditHistoryAsync|GetAuditEventsAsync' | Select-Object LineNumber, Line\")",
+      "Bash(powershell -Command \"Stop-Process -Name dotnet -Force -ErrorAction SilentlyContinue\")",
+      "Bash(powershell -Command \"Start-Sleep -Seconds 15; Get-Process -Id 6064 -ErrorAction SilentlyContinue | Select-Object Id, CPU, Responding\")",
+      "Bash(powershell -Command \"Select-String -Path 'c:\\\\Users\\\\Admin\\\\Documents\\\\vsCode\\\\git\\\\GenericEdit\\\\backend\\\\src\\\\DatasetPlatform.Api\\\\apiDiag.log' -Pattern 'EnsureApproverCheck|Signoff|signoff' | Select-Object -Last 20 | Select-Object LineNumber, Line\")",
+      "Bash(powershell -Command \"Get-Content 'c:\\\\Users\\\\Admin\\\\Documents\\\\vsCode\\\\git\\\\GenericEdit\\\\backend\\\\src\\\\DatasetPlatform.Api\\\\apiDiag.log' | Select-Object -Last 20\")",
+      "Bash(powershell -Command \"Start-Sleep -Seconds 12; Get-Content 'c:\\\\Users\\\\Admin\\\\Documents\\\\vsCode\\\\git\\\\GenericEdit\\\\backend\\\\src\\\\DatasetPlatform.Api\\\\apiDiag.log' | Select-Object -Last 30\")",
+      "Bash(dotnet restore:*)",
+      "Bash(Stop-Process -Name dotnet -Force)",
+      "Bash(taskkill /F /IM dotnet.exe)",
+      "Bash(powershell -Command \"Stop-Process -Name dotnet -Force -ErrorAction SilentlyContinue; Write-Host 'Done'\")",
+      "Bash(powershell -File \"c:/Users/Admin/Documents/vsCode/git/GenericEdit/start-dev.ps1\")",
+      "Bash(curl -s http://localhost:5201/health)"
+    ]
+  }
+}

@@ -50,11 +50,11 @@ public sealed class DatasetInstance
     /// </summary>
     public IReadOnlyList<IDictionary<string, object?>> Rows { get; init; } = [];
 
-    /// <summary>User ID of the person who first created this instance. May be null for records migrated from legacy systems.</summary>
-    public string? CreatedBy { get; init; }
+    /// <summary>User ID of the person who first created this instance.</summary>
+    public required string CreatedBy { get; init; }
 
-    /// <summary>UTC timestamp of when this instance was first created. May be null for legacy records.</summary>
-    public DateTimeOffset? CreatedAtUtc { get; init; }
+    /// <summary>UTC timestamp of when this instance was first created.</summary>
+    public required DateTimeOffset CreatedAtUtc { get; init; }
 
     /// <summary>User ID of the person who last modified (or signed off) this instance.</summary>
     public required string LastModifiedBy { get; init; }

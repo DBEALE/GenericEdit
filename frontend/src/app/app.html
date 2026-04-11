@@ -107,9 +107,6 @@
           <h3>
             Saved Headers
             <span class="row-count">{{ sortedInstances().length }} rows</span>
-            @if (hasInstanceFilters()) {
-              <span class="instance-filter-inline">{{ instancesHiddenCount() }} hidden</span>
-            }
           </h3>
           <div class="saved-headers-actions">
             <button type="button" (click)="startNewHeaderDraft()" [disabled]="!canWriteData()">New Header</button>
@@ -121,7 +118,7 @@
             <select
               class="field-input"
               [ngModel]="instanceDatePreset()"
-              (ngModelChange)="applySavedHeaderDatePreset($event)">
+              (ngModelChange)="applySavedHeaderDatePreset($event, false)">
               @for (preset of savedHeaderDatePresets; track preset) {
                 <option [value]="preset">{{ preset }}</option>
               }
@@ -262,7 +259,7 @@
             <div class="toolbar section-actions">
               <button type="button" (click)="saveData()" [disabled]="!canWriteData() || !hasEditorChanges()">{{ saveActionLabel() }}</button>
               <button type="button" (click)="saveAsCopy()" [disabled]="!canWriteData() || !hasHeaderChanges()">Save Copy</button>
-              <button type="button" (click)="signoff()" [disabled]="!canSignoff() || !currentInstance() || state().trim().toLowerCase() === 'official'">Signoff</button>
+              <button type="button" (click)="signoff()" [disabled]="!currentInstance() || state().trim().toLowerCase() === 'official'">Signoff</button>
             </div>
           </div>
           <div class="ag-theme-quartz header-table-wrap">

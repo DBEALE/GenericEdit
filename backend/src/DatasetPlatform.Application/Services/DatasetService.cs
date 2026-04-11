@@ -8,7 +8,7 @@ using System.Globalization;
 
 namespace DatasetPlatform.Application.Services;
 
-public sealed class DatasetService(IDataRepository repository, ILogger<DatasetService>? logger = null) : IDatasetService
+public sealed class DatasetService(IDataRepository repository, LookupValueCache lookupCache, ILogger<DatasetService>? logger = null) : IDatasetService
 {
     private readonly ILogger<DatasetService> logger = logger ?? NullLogger<DatasetService>.Instance;
     private const string OfficialState = "Official";
@@ -201,9 +201,7 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
             normalizedHeaderCriteria,
             includeDetails: false);
 
-        var filtered = ApplyInstanceFilters(instances, minAsOfDate, maxAsOfDate, normalizedState, normalizedHeaderCriteria);
-
-        return filtered
+        return instances
             .OrderByDescending(x => x.AsOfDate)
             .ThenByDescending(x => x.Version)
             .Select(ToHeaderSummary)
@@ -577,13 +575,13 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
                 Version = existing.Version + 1,
                 Header = CloneMap(request.Header),
                 Rows = request.Rows.Select(CloneMap).ToList(),
-                CreatedBy = existing.CreatedBy ?? existing.LastModifiedBy,
-                CreatedAtUtc = existing.CreatedAtUtc ?? existing.LastModifiedAtUtc,
+                CreatedBy = existing.CreatedBy,
+                CreatedAtUtc = existing.CreatedAtUtc,
                 LastModifiedBy = user.UserId,
                 LastModifiedAtUtc = DateTimeOffset.UtcNow
             };
 
-            await repository.ReplaceInstanceAsync(updated, cancellationToken);
+            await repository.ReplaceInstanceAsync(updated, cancellationToken, existing);
             var updateRowChanges = BuildUpdateAuditRowChanges(existing, updated, schema);
             await AddAuditAsync(user, "INSTANCE_UPDATE", key, updated.Id, cancellationToken, updateRowChanges);
             return updated;
@@ -673,13 +671,13 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
                 Version = existing.Version,
                 Header = CloneMap(existing.Header),
                 Rows = existing.Rows.Select(CloneMap).ToList(),
-                CreatedBy = existing.CreatedBy ?? existing.LastModifiedBy,
-                CreatedAtUtc = existing.CreatedAtUtc ?? existing.LastModifiedAtUtc,
+                CreatedBy = existing.CreatedBy,
+                CreatedAtUtc = existing.CreatedAtUtc,
                 LastModifiedBy = user.UserId,
                 LastModifiedAtUtc = DateTimeOffset.UtcNow
             };
 
-            await repository.ReplaceInstanceAsync(official, cancellationToken);
+            await repository.ReplaceInstanceAsync(official, cancellationToken, existing);
             await AddAuditAsync(user, InstanceSignoffAction, key, official.Id, cancellationToken);
             return official;
         }
@@ -705,11 +703,22 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
         }
     }
 
-    public async Task<IReadOnlyList<AuditEvent>> GetAuditAsync(UserContext user, CancellationToken cancellationToken, string? datasetKey = null)
+    public async Task<IReadOnlyList<AuditEvent>> GetAuditAsync(UserContext user, CancellationToken cancellationToken, string? datasetKey = null, Guid? instanceId = null)
     {
         var normalizedDatasetKey = string.IsNullOrWhiteSpace(datasetKey)
             ? null
             : NormalizeDatasetKey(datasetKey);
+
+        // Fast path: caller knows exactly which instance they want — read only its subfolder.
+        if (instanceId.HasValue && !string.IsNullOrWhiteSpace(normalizedDatasetKey))
+        {
+            if (!user.HasRole(DatasetAuthorizer.DatasetAdminRole))
+            {
+                var schema = await GetSchemaOrThrowAsync(normalizedDatasetKey, cancellationToken);
+                EnsureAuthorized(DatasetAuthorizer.CanRead(schema, user), "User is not authorized to view audit logs for this dataset.");
+            }
+            return await repository.GetInstanceAuditHistoryAsync(normalizedDatasetKey, instanceId.Value, cancellationToken);
+        }
 
         if (user.HasRole(DatasetAuthorizer.DatasetAdminRole))
         {
@@ -768,10 +777,7 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
         string approverUserId,
         CancellationToken cancellationToken)
     {
-        var auditEvents = await repository.GetAuditEventsAsync(datasetKey, cancellationToken);
-        var instanceAudit = auditEvents
-            .Where(x => x.DatasetInstanceId == instanceId)
-            .ToList();
+        var instanceAudit = await repository.GetInstanceAuditHistoryAsync(datasetKey, instanceId, cancellationToken);
 
         var lastSignoffAtUtc = instanceAudit
             .Where(x => string.Equals(x.Action, InstanceSignoffAction, StringComparison.OrdinalIgnoreCase))
@@ -810,160 +816,8 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
             + $"Contributors since last approval: {string.Join(", ", contributorsSinceLastSignoff)}.");
     }
 
-    private static string BuildCreateAuditDetails(DatasetInstance instance, DatasetSchema schema)
-    {
-        var headerText = $"Header: {FormatRowForAudit(instance.Header)}. ";
-        var keyFields = GetDetailKeyFields(schema);
-        if (keyFields.Count == 0)
-        {
-            return $"Created version {instance.Version} for {instance.AsOfDate} / {instance.State}. {headerText}Detail rows saved: {instance.Rows.Count}. Row data was not audited because no key fields were defined.";
-        }
 
-        var rowDetails = instance.Rows
-            .Select((row) =>
-            {
-                var rowKey = BuildRowKey(row, keyFields);
-                return $"row [{rowKey}] added {FormatRowForAudit(row)}";
-            })
-            .ToList();
 
-        var rowsText = rowDetails.Count == 0
-            ? "no detail rows"
-            : string.Join(" | ", rowDetails);
-
-        return $"Created version {instance.Version} for {instance.AsOfDate} / {instance.State}. {headerText}Detail rows ({instance.Rows.Count}): {rowsText}.";
-    }
-
-    private static string BuildUpdateAuditDetails(DatasetInstance existing, DatasetInstance updated, DatasetSchema schema)
-    {
-        var headerChanged = !RowsEqual(existing.Header, updated.Header);
-        var lifecycleChangeSummary = BuildLifecycleDiffSummary(existing, updated);
-        var headerChangeSummary = headerChanged
-            ? BuildHeaderDiffSummary(existing.Header, updated.Header)
-            : string.Empty;
-        var lifecycleText = string.IsNullOrWhiteSpace(lifecycleChangeSummary)
-            ? string.Empty
-            : $"Lifecycle changes: {lifecycleChangeSummary}. ";
-        var keyFields = GetDetailKeyFields(schema);
-        if (keyFields.Count == 0)
-        {
-            var headerFallbackText = headerChanged
-                ? $"Header: before={FormatRowForAudit(existing.Header)}; after={FormatRowForAudit(updated.Header)}. Header changes: {headerChangeSummary}. "
-                : string.Empty;
-            return $"Replaced instance {existing.Id} in place. {lifecycleText}{headerFallbackText}Row data was not audited because no key fields were defined.";
-        }
-
-        var changeLines = GetChangedRowAuditLines(existing.Rows, updated.Rows, keyFields);
-        var changesText = changeLines.Count == 0
-            ? "no detail row changes"
-            : string.Join(" | ", changeLines);
-
-        var headerText = headerChanged
-            ? $"Header: before={FormatRowForAudit(existing.Header)}; after={FormatRowForAudit(updated.Header)}. Header changes: {headerChangeSummary}. "
-            : string.Empty;
-
-        return $"Updated instance {existing.Id}. {lifecycleText}{headerText}Changes ({changeLines.Count}): {changesText}.";
-    }
-
-    private static string BuildLifecycleDiffSummary(DatasetInstance before, DatasetInstance after)
-    {
-        var changes = new List<string>();
-
-        if (before.AsOfDate != after.AsOfDate)
-        {
-            changes.Add($"asOfDate {before.AsOfDate:yyyy-MM-dd} -> {after.AsOfDate:yyyy-MM-dd}");
-        }
-
-        if (!string.Equals(before.State, after.State, StringComparison.OrdinalIgnoreCase))
-        {
-            changes.Add($"state {before.State} -> {after.State}");
-        }
-
-        if (changes.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        return string.Join(", ", changes);
-    }
-
-    private static string BuildHeaderDiffSummary(IDictionary<string, object?> beforeHeader, IDictionary<string, object?> afterHeader)
-    {
-        var allFields = beforeHeader.Keys
-            .Concat(afterHeader.Keys)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var changes = new List<string>();
-        foreach (var field in allFields)
-        {
-            beforeHeader.TryGetValue(field, out var beforeValue);
-            afterHeader.TryGetValue(field, out var afterValue);
-            var beforeText = FormatValueForAudit(beforeValue);
-            var afterText = FormatValueForAudit(afterValue);
-            if (!string.Equals(beforeText, afterText, StringComparison.Ordinal))
-            {
-                changes.Add($"{field} {beforeText} -> {afterText}");
-            }
-        }
-
-        if (changes.Count == 0)
-        {
-            return "no header value changes";
-        }
-
-        return string.Join(", ", changes);
-    }
-
-    private static List<string> GetChangedRowAuditLines(
-        IReadOnlyList<IDictionary<string, object?>> beforeRows,
-        IReadOnlyList<IDictionary<string, object?>> afterRows,
-        IReadOnlyList<string> keyFields)
-    {
-        var beforeByKey = beforeRows.ToDictionary(
-            row => BuildRowKey(row, keyFields),
-            row => row,
-            StringComparer.OrdinalIgnoreCase);
-
-        var afterByKey = afterRows.ToDictionary(
-            row => BuildRowKey(row, keyFields),
-            row => row,
-            StringComparer.OrdinalIgnoreCase);
-
-        var allKeys = beforeByKey.Keys
-            .Concat(afterByKey.Keys)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var lines = new List<string>();
-
-        foreach (var rowKey in allKeys)
-        {
-            var hasBefore = beforeByKey.TryGetValue(rowKey, out var beforeRow);
-            var hasAfter = afterByKey.TryGetValue(rowKey, out var afterRow);
-
-            if (!hasBefore && hasAfter)
-            {
-                lines.Add($"added row [{rowKey}] {FormatNonKeyValuesForAudit(afterRow!, keyFields)}");
-                continue;
-            }
-
-            if (hasBefore && !hasAfter)
-            {
-                lines.Add($"removed row [{rowKey}] {FormatNonKeyValuesForAudit(beforeRow!, keyFields)}");
-                continue;
-            }
-
-            if (hasBefore && hasAfter && !RowsEqual(beforeRow!, afterRow!))
-            {
-                lines.Add($"updated row [{rowKey}] ({BuildFieldDiffSummary(beforeRow!, afterRow!)})");
-            }
-        }
-
-        return lines;
-    }
 
     private static List<AuditRowChange> BuildCreateAuditRowChanges(DatasetInstance instance, DatasetSchema schema)
     {
@@ -1116,56 +970,7 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
         return true;
     }
 
-    private static string FormatRowForAudit(IDictionary<string, object?> row)
-    {
-        var ordered = row
-            .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(x => $"{x.Key}={FormatValueForAudit(x.Value)}");
-        return "{" + string.Join(", ", ordered) + "}";
-    }
 
-    private static string BuildFieldDiffSummary(IDictionary<string, object?> beforeRow, IDictionary<string, object?> afterRow)
-    {
-        var allFields = beforeRow.Keys
-            .Concat(afterRow.Keys)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var changes = new List<string>();
-        foreach (var field in allFields)
-        {
-            beforeRow.TryGetValue(field, out var beforeValue);
-            afterRow.TryGetValue(field, out var afterValue);
-            var beforeText = FormatValueForAudit(beforeValue);
-            var afterText = FormatValueForAudit(afterValue);
-            if (!string.Equals(beforeText, afterText, StringComparison.Ordinal))
-            {
-                changes.Add($"{field} {beforeText} -> {afterText}");
-            }
-        }
-
-        if (changes.Count == 0)
-        {
-            return "no value changes";
-        }
-
-        return string.Join(", ", changes);
-    }
-
-    private static string FormatNonKeyValuesForAudit(IDictionary<string, object?> row, IReadOnlyList<string> keyFields)
-    {
-        var nonKeyValues = row
-            .Where(x => !keyFields.Contains(x.Key, StringComparer.OrdinalIgnoreCase))
-            .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
-
-        if (nonKeyValues.Count == 0)
-        {
-            return "{no non-key fields}";
-        }
-
-        return FormatRowForAudit(nonKeyValues);
-    }
 
     private static string FormatValueForAudit(object? value)
     {
@@ -1581,41 +1386,19 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
 
     private async Task<IReadOnlyList<string>> ResolveLookupPermissibleValuesAsync(string lookupDatasetKey, CancellationToken cancellationToken)
     {
-        var lookupSchema = await repository.GetSchemaAsync(lookupDatasetKey, cancellationToken)
-            ?? throw new DatasetServiceException($"Lookup dataset schema '{lookupDatasetKey}' was not found.", DatasetServiceErrorCode.NotFound);
+        var current = await repository.GetLatestInstanceVersionAsync(lookupDatasetKey, OfficialState, cancellationToken)
+            ?? throw new DatasetServiceException($"Lookup dataset '{lookupDatasetKey}' has no official instance.");
 
-        if (lookupSchema.DetailFields.Count == 0)
-        {
-            throw new DatasetServiceException($"Lookup dataset '{lookupDatasetKey}' has no detail fields.");
-        }
+        if (lookupCache.TryGet(lookupDatasetKey, current.Id, current.Version, out var cached))
+            return cached;
 
-        var lookupSourceFieldName = lookupSchema.DetailFields[0].Name;
+        // Use the ID already resolved by GetLatestInstanceVersionAsync — avoids repeating the prefix query.
+        var latestOfficial = await repository.GetInstanceAsync(lookupDatasetKey, current.Id, cancellationToken)
+            ?? throw new DatasetServiceException($"Lookup dataset '{lookupDatasetKey}' has no official instance.");
 
-        // Walk backwards in 400-day windows to find the most recent Official instance.
-        // Each window uses the fast per-day prefix path (≤400 day span) rather than a full
-        // scan, so we avoid reading thousands of header files across all historical dates.
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        DatasetInstance? latestOfficial = null;
-        for (var windowEnd = today; windowEnd > today.AddYears(-20) && latestOfficial is null; windowEnd = windowEnd.AddDays(-401))
-        {
-            var windowStart = windowEnd.AddDays(-400);
-            var candidates = await repository.GetInstancesAsync(
-                lookupDatasetKey, cancellationToken,
-                minAsOfDate: windowStart,
-                maxAsOfDate: windowEnd,
-                state: OfficialState,
-                includeDetails: true);
-
-            latestOfficial = candidates
-                .OrderByDescending(x => x.AsOfDate)
-                .ThenByDescending(x => x.Version)
-                .FirstOrDefault();
-        }
-
-        if (latestOfficial is null)
-        {
-            throw new DatasetServiceException($"Lookup dataset '{lookupDatasetKey}' has no official instance.");
-        }
+        // Rows are written in schema field order, so the first key is the lookup source field.
+        var lookupSourceFieldName = (latestOfficial.Rows.Count > 0 ? latestOfficial.Rows[0].Keys.FirstOrDefault() : null)
+            ?? throw new DatasetServiceException($"Lookup dataset '{lookupDatasetKey}' has no values in its latest official instance.");
 
         var values = latestOfficial.Rows
             .Select(row =>
@@ -1632,6 +1415,7 @@ public sealed class DatasetService(IDataRepository repository, ILogger<DatasetSe
             throw new DatasetServiceException($"Lookup dataset '{lookupDatasetKey}' has no values in first detail field '{lookupSourceFieldName}' for latest official instance.");
         }
 
+        lookupCache.Set(lookupDatasetKey, latestOfficial.Id, latestOfficial.Version, values);
         return values;
     }
 }

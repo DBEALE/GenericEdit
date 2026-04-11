@@ -62,11 +62,17 @@ public sealed class S3BlobStore(IAmazonS3 s3Client, IOptions<StorageOptions> opt
 
     public async Task<IReadOnlyList<string>> QueryBlobsAsync(string wildcardPattern, CancellationToken cancellationToken)
     {
+        var entries = await QueryBlobsWithMetadataAsync(wildcardPattern, cancellationToken);
+        return entries.Select(e => e.Key).ToList();
+    }
+
+    public async Task<IReadOnlyList<BlobEntry>> QueryBlobsWithMetadataAsync(string wildcardPattern, CancellationToken cancellationToken)
+    {
         var wildcardIndex = wildcardPattern.IndexOfAny(['*', '?']);
         var prefix = wildcardIndex >= 0 ? wildcardPattern[..wildcardIndex] : wildcardPattern;
         var regex = WildcardToRegex(wildcardPattern);
 
-        var keys = new List<string>();
+        var entries = new List<BlobEntry>();
         string? continuation = null;
 
         do
@@ -78,12 +84,14 @@ public sealed class S3BlobStore(IAmazonS3 s3Client, IOptions<StorageOptions> opt
                 ContinuationToken = continuation
             }, cancellationToken);
 
-            keys.AddRange(response.S3Objects.Select(x => x.Key).Where(k => regex.IsMatch(k)));
+            entries.AddRange(response.S3Objects
+                .Where(x => regex.IsMatch(x.Key))
+                .Select(x => new BlobEntry(x.Key, x.LastModified.HasValue ? new DateTimeOffset(x.LastModified.Value, TimeSpan.Zero) : DateTimeOffset.MinValue)));
             continuation = response.IsTruncated == true ? response.NextContinuationToken : null;
         }
         while (!string.IsNullOrEmpty(continuation));
 
-        return keys;
+        return entries;
     }
 
     private static Regex WildcardToRegex(string pattern)

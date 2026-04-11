@@ -95,10 +95,10 @@ public sealed class DatasetHeaderSummary
     public Dictionary<string, object?> Header { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>User who originally created this instance.</summary>
-    public string? CreatedBy { get; init; }
+    public string CreatedBy { get; init; } = string.Empty;
 
     /// <summary>UTC timestamp of creation.</summary>
-    public DateTimeOffset? CreatedAtUtc { get; init; }
+    public DateTimeOffset CreatedAtUtc { get; init; }
 
     /// <summary>User who last modified or signed off this instance.</summary>
     public string LastModifiedBy { get; init; } = string.Empty;

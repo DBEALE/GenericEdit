@@ -1,5 +1,3 @@
-using System.Text.Json.Serialization;
-
 namespace DatasetPlatform.Domain.Models;
 
 /// <summary>
@@ -31,44 +29,4 @@ public sealed class DatasetPermissions
     /// <summary>Roles/users allowed to create, modify, or delete this dataset's schema definition.</summary>
     public HashSet<string> DatasetAdminRoles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    // ─── Legacy aliases ─────────────────────────────────────────────────────────
-    // Older persisted schema JSON used "readUsers", "writeUsers", etc.
-    // These write-only properties transparently migrate those values into the
-    // current role-based properties on deserialization. They are never serialized.
-
-    /// <inheritdoc cref="ReadRoles"/>
-    [JsonPropertyName("readUsers")]
-    public HashSet<string>? LegacyReadUsers
-    {
-        set => ReadRoles = Normalize(value);
-    }
-
-    /// <inheritdoc cref="WriteRoles"/>
-    [JsonPropertyName("writeUsers")]
-    public HashSet<string>? LegacyWriteUsers
-    {
-        set => WriteRoles = Normalize(value);
-    }
-
-    /// <inheritdoc cref="SignoffRoles"/>
-    [JsonPropertyName("signoffUsers")]
-    public HashSet<string>? LegacySignoffUsers
-    {
-        set => SignoffRoles = Normalize(value);
-    }
-
-    /// <inheritdoc cref="DatasetAdminRoles"/>
-    [JsonPropertyName("datasetAdminUsers")]
-    public HashSet<string>? LegacyDatasetAdminUsers
-    {
-        set => DatasetAdminRoles = Normalize(value);
-    }
-
-    /// <summary>Returns a new case-insensitive <see cref="HashSet{T}"/> copied from <paramref name="source"/>, or an empty set if null.</summary>
-    private static HashSet<string> Normalize(HashSet<string>? source)
-    {
-        return source is null
-            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            : new HashSet<string>(source, StringComparer.OrdinalIgnoreCase);
-    }
 }

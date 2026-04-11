@@ -18,6 +18,7 @@ using DatasetPlatform.Application.Abstractions;
 using DatasetPlatform.Application.Services;
 using Amazon;
 using Amazon.S3;
+using Microsoft.Extensions.Options;
 using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -44,14 +45,21 @@ if (string.Equals(storageOptions.Provider, StorageProviders.S3, StringComparison
 
         return new AmazonS3Client(config);
     });
-    builder.Services.AddSingleton<IBlobStore, S3BlobStore>();
+    builder.Services.AddSingleton<IBlobStore>(sp => new InstrumentedBlobStore(
+        new S3BlobStore(sp.GetRequiredService<IAmazonS3>(), sp.GetRequiredService<IOptions<StorageOptions>>()),
+        sp.GetRequiredService<IWebHostEnvironment>(),
+        sp.GetRequiredService<IOptions<StorageOptions>>()));
     builder.Services.AddSingleton<IDataRepository, BlobDataRepository>();
 }
 else
 {
-    builder.Services.AddSingleton<IBlobStore, FileSystemBlobStore>();
+    builder.Services.AddSingleton<IBlobStore>(sp => new InstrumentedBlobStore(
+        new FileSystemBlobStore(sp.GetRequiredService<IOptions<StorageOptions>>()),
+        sp.GetRequiredService<IWebHostEnvironment>(),
+        sp.GetRequiredService<IOptions<StorageOptions>>()));
     builder.Services.AddSingleton<IDataRepository, BlobDataRepository>();
 }
+builder.Services.AddSingleton<LookupValueCache>();
 builder.Services.AddScoped<IDatasetService, DatasetService>();
 builder.Services.AddScoped<IRequestUserContextAccessor, RequestUserContextAccessor>();
 builder.Services.AddHttpContextAccessor();
@@ -62,7 +70,10 @@ builder.Services
     {
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
-builder.Services.AddOpenApi();
+builder.Services.AddHealthChecks()
+    .AddCheck<BlobStoreHealthCheck>("blob_store");
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
@@ -75,12 +86,14 @@ var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.UseSwagger();
+    app.UseSwaggerUI();
 }
 
 app.UseCors();
 app.UseHttpsRedirection();
 app.UseMiddleware<ApiDiagnosticsMiddleware>();
+app.MapHealthChecks("/health");
 app.MapControllers();
 
 app.Run();

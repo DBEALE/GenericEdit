@@ -9,7 +9,7 @@ import { QueryPageComponent } from './query-page/query-page';
 
 type DetailGridRow = Record<string, unknown> & { __rowKey: string };
 type UserSimulationPreset = { label: string; userId: string; roles: string[] };
-type SavedHeaderDatePreset = 'Last month' | 'Last 3 months' | 'Last 6 months' | 'Last 1 year';
+type SavedHeaderDatePreset = 'Last month' | 'Last 3 months' | 'Last 6 months' | 'Last 1 year' | 'Last 3 years' | 'Last 5 years';
 type SignoffReviewItem = {
   id: string;
   occurredAtUtc: string;
@@ -242,7 +242,7 @@ export class App {
   readonly instanceFilterAsOfDate = signal('');
   readonly instanceFilterState = signal('');
   readonly instanceFilterHeader = signal('');
-  readonly savedHeaderDatePresets: SavedHeaderDatePreset[] = ['Last month', 'Last 3 months', 'Last 6 months', 'Last 1 year'];
+  readonly savedHeaderDatePresets: SavedHeaderDatePreset[] = ['Last month', 'Last 3 months', 'Last 6 months', 'Last 1 year', 'Last 3 years', 'Last 5 years'];
   readonly instanceDatePreset = signal<SavedHeaderDatePreset>('Last month');
   readonly instanceFilterAsOfDateMinDraft = signal('');
   readonly instanceFilterAsOfDateMaxDraft = signal('');
@@ -320,6 +320,7 @@ export class App {
   private errorToastTimer?: ReturnType<typeof setTimeout>;
   private schemaJsonSyncInProgress = false;
   private lookupOptionsRequestId = 0;
+  private headersRequestId = 0;
   private pendingSignoffRequest: { datasetKey: string; instanceId: string } | null = null;
 
   readonly canCreateSchema = computed(() => this.hasRole('DatasetAdmin'));
@@ -590,7 +591,7 @@ export class App {
   runSavedHeaderSearch(): void {
     this.instanceFilterAsOfDateMin.set(this.instanceFilterAsOfDateMinDraft().trim());
     this.instanceFilterAsOfDateMax.set(this.instanceFilterAsOfDateMaxDraft().trim());
-    this.loadDatasetInstances();
+    this.loadDatasetInstances(true);
   }
 
   toggleUserSimulation(): void {
@@ -739,7 +740,6 @@ export class App {
     this.activeTab.set('editor');
     this.showValidation.set(false);
     this.lookupPermissibleValues.set({});
-    this.loadLookupPermissibleValues(schema);
     this.loadDatasetInstances(true);
   }
 
@@ -829,6 +829,8 @@ export class App {
       this.setStatus(`Loading ${schema.name}...`);
     }
 
+    const requestId = ++this.headersRequestId;
+
     this.api.getHeaders(
       this.userId(),
       this.roles(),
@@ -840,6 +842,7 @@ export class App {
       this.includeInternalInfoDebug
     ).subscribe({
       next: (response) => {
+        if (requestId !== this.headersRequestId) return;
         const isWrapped = this.isHeadersInternalResponse(response);
         const headers = isWrapped ? response.items : response;
         const internalInfo = isWrapped ? response.internalInfo : undefined;
@@ -850,7 +853,10 @@ export class App {
           this.setStatus(`Loaded ${schema.name}`);
         }
       },
-      error: (err) => this.setError(err)
+      error: (err) => {
+        if (requestId !== this.headersRequestId) return;
+        this.setError(err);
+      }
     });
   }
 
@@ -868,6 +874,7 @@ export class App {
       return;
     }
 
+    this.loadLookupPermissibleValues(schema);
     this.setStatus(`Loading instance ${instance.id}...`);
     this.api.getInstanceById(this.userId(), this.roles(), schema.key, instance.id).subscribe({
       next: (fullInstance) => {
@@ -895,6 +902,7 @@ export class App {
       return;
     }
 
+    this.loadLookupPermissibleValues(schema);
     this.currentInstance.set(null);
     this.selectedInstanceId.set('');
     this.asOfDate.set(this.todayDate());
@@ -1458,7 +1466,7 @@ export class App {
 
     this.clearError();
     this.setStatus('Loading signoff review...');
-    this.api.getAudit(this.userId(), this.roles(), schema.key).subscribe({
+    this.api.getAudit(this.userId(), this.roles(), schema.key, current.id).subscribe({
       next: (audit) => {
         const eligibility = this.evaluateSignoffEligibility(audit, current.id, this.userId());
         if (!eligibility.allowed) {
@@ -1980,26 +1988,24 @@ export class App {
 
   private normalizeSchema(value: unknown): DatasetSchema {
     const input = (value ?? {}) as Partial<DatasetSchema>;
-    const legacyKeyFields = this.normalizeUsers((input as { keyFields?: unknown }).keyFields);
     const permissions = (input.permissions ?? {}) as Record<string, unknown>;
     return {
       key: input.key?.toString().trim().toUpperCase() ?? '',
       name: input.name?.toString() ?? '',
       description: input.description?.toString() ?? '',
       headerFields: this.normalizeSchemaFields(input.headerFields),
-      detailFields: this.normalizeSchemaFields(input.detailFields, legacyKeyFields),
+      detailFields: this.normalizeSchemaFields(input.detailFields),
       permissions: {
-        readRoles: this.normalizeUsers(permissions['readRoles'] ?? permissions['readUsers']),
-        writeRoles: this.normalizeUsers(permissions['writeRoles'] ?? permissions['writeUsers']),
-        signoffRoles: this.normalizeUsers(permissions['signoffRoles'] ?? permissions['signoffUsers']),
-        datasetAdminRoles: this.normalizeUsers(permissions['datasetAdminRoles'] ?? permissions['datasetAdminUsers'])
+        readRoles: this.normalizeUsers(permissions['readRoles']),
+        writeRoles: this.normalizeUsers(permissions['writeRoles']),
+        signoffRoles: this.normalizeUsers(permissions['signoffRoles']),
+        datasetAdminRoles: this.normalizeUsers(permissions['datasetAdminRoles'])
       }
     };
   }
 
-  private normalizeSchemaFields(fields: unknown, legacyKeyFields: string[] = []): SchemaField[] {
+  private normalizeSchemaFields(fields: unknown): SchemaField[] {
     const list = Array.isArray(fields) ? fields : [];
-    const legacyKeyFieldSet = new Set(legacyKeyFields.map((x) => x.toLowerCase()));
     return list.map((raw) => {
       const field = (raw ?? {}) as Partial<SchemaField>;
       const type = field.type ?? 'String';
@@ -2012,7 +2018,7 @@ export class App {
         name: field.name?.toString() ?? '',
         label: field.label?.toString() ?? '',
         type: normalizedType,
-        isKey: field.isKey === true || legacyKeyFieldSet.has((field.name?.toString() ?? '').toLowerCase()),
+        isKey: field.isKey === true,
         required: field.required === true,
         maxLength: typeof field.maxLength === 'number' ? field.maxLength : undefined,
         minValue: typeof field.minValue === 'number' ? field.minValue : undefined,
@@ -2335,14 +2341,17 @@ export class App {
           ? null
           : `must be one of: ${this.getPermissibleValuesForField(field).join(', ')}`;
       case 'Lookup': {
-        const values = this.getPermissibleValuesForField(field);
-        if (values.length === 0) {
+        const lookupKey = field.lookupDatasetKey?.trim().toUpperCase() ?? '';
+        const loadedValues = lookupKey ? this.lookupPermissibleValues()[lookupKey] : undefined;
+        if (loadedValues === undefined) {
+          return null; // not loaded yet — defer validation
+        }
+        if (loadedValues.length === 0) {
           return 'has no lookup values available';
         }
-
-        return values.some((allowed) => allowed.toLowerCase() === text.toLowerCase())
+        return loadedValues.some((allowed) => allowed.toLowerCase() === text.toLowerCase())
           ? null
-          : `must be one of: ${values.join(', ')}`;
+          : `must be one of: ${loadedValues.join(', ')}`;
       }
       default:
         return null;
@@ -2450,8 +2459,12 @@ export class App {
       start.setMonth(start.getMonth() - 3);
     } else if (preset === 'Last 6 months') {
       start.setMonth(start.getMonth() - 6);
-    } else {
+    } else if (preset === 'Last 1 year') {
       start.setFullYear(start.getFullYear() - 1);
+    } else if (preset === 'Last 3 years') {
+      start.setFullYear(start.getFullYear() - 3);
+    } else {
+      start.setFullYear(start.getFullYear() - 5);
     }
 
     return {

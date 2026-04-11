@@ -1,5 +1,8 @@
 namespace DatasetPlatform.Api.Infrastructure;
 
+/// <summary>A blob key together with its last-modified timestamp.</summary>
+public readonly record struct BlobEntry(string Key, DateTimeOffset LastModified);
+
 /// <summary>
 /// Low-level binary storage abstraction. Hides the difference between local filesystem
 /// and cloud object storage (S3) from the repository layer.
@@ -37,4 +40,10 @@ public interface IBlobStore
     /// Returns relative paths from the storage root, using forward slashes.
     /// </summary>
     Task<IReadOnlyList<string>> QueryBlobsAsync(string wildcardPattern, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Same as <see cref="QueryBlobsAsync"/> but also returns the last-modified timestamp for
+    /// each matching blob, so callers can detect whether a cached entry is stale.
+    /// </summary>
+    Task<IReadOnlyList<BlobEntry>> QueryBlobsWithMetadataAsync(string wildcardPattern, CancellationToken cancellationToken);
 }

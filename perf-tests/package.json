@@ -1,0 +1,10 @@
+{
+  "name": "perf-tests",
+  "private": true,
+  "scripts": {
+    "test": "node run-scenario.js"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.52.0"
+  }
+}

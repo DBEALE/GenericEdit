@@ -20,7 +20,12 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
     private readonly IBlobStore _blobStore = blobStore;
     private readonly string _storageProvider = options.Value.Provider;
     private readonly S3StorageOptions _s3 = options.Value.S3;
-    private bool _legacyAuditMigrated;
+
+    // In-memory caches — all access is serialised by _semaphore so plain Dictionary is safe.
+    private readonly Dictionary<string, DatasetSchema> _schemaCache = new(StringComparer.OrdinalIgnoreCase);
+    // Value is (parsed header, last-modified at read time).
+    // DateTimeOffset.MaxValue is a sentinel meaning "written by this process — always fresh".
+    private readonly Dictionary<string, (DatasetInstanceHeaderIndex Header, DateTimeOffset LastModified)> _headerIndexCache = new(StringComparer.Ordinal);
 
     public async Task<IReadOnlyList<DatasetSchema>> GetSchemasAsync(CancellationToken cancellationToken)
     {
@@ -51,7 +56,12 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         await _semaphore.WaitAsync(cancellationToken);
         try
         {
-            return await ReadJsonAsync<DatasetSchema?>(GetSchemaKey(datasetKey), null, cancellationToken);
+            if (_schemaCache.TryGetValue(datasetKey, out var cached))
+                return cached;
+            var schema = await ReadJsonAsync<DatasetSchema?>(GetSchemaKey(datasetKey), null, cancellationToken);
+            if (schema is not null)
+                _schemaCache[datasetKey] = schema;
+            return schema;
         }
         finally
         {
@@ -65,6 +75,7 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         try
         {
             await WriteJsonAsync(GetSchemaKey(schema.Key), schema, cancellationToken);
+            _schemaCache[schema.Key] = schema;
         }
         finally
         {
@@ -87,6 +98,10 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
             {
                 await DeleteIfExistsAsync(key, cancellationToken);
             }
+
+            _schemaCache.Remove(datasetKey);
+            foreach (var k in _headerIndexCache.Keys.Where(k => k.Contains($"/{normalizedKey}/", StringComparison.OrdinalIgnoreCase)).ToList())
+                _headerIndexCache.Remove(k);
         }
         finally
         {
@@ -153,7 +168,7 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         await _semaphore.WaitAsync(cancellationToken);
         try
         {
-            await SaveInstanceUnlockedAsync(instance, cancellationToken);
+            await SaveInstanceUnlockedAsync(instance, cancellationToken, isNew: true);
         }
         finally
         {
@@ -161,18 +176,84 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         }
     }
 
-    public async Task<bool> ReplaceInstanceAsync(DatasetInstance instance, CancellationToken cancellationToken)
+    public async Task<DatasetInstance?> GetLatestInstanceAsync(string datasetKey, string state, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
         try
         {
-            var key = GetInstanceKey(instance.DatasetKey, instance.Id);
-            if (!await ObjectExistsAsync(key, cancellationToken))
-            {
-                return false;
-            }
+            var normalizedDataset = EncodeFileKey(datasetKey);
+            var normalizedState = DatasetHeaderPartitioning.NormalizeStateFilter(state);
+            if (normalizedState is null) return null;
+            var winner = await FindLatestWinnerAsync(normalizedDataset, normalizedState, cancellationToken);
+            if (winner is null) return null;
+            return await ReadJsonAsync<DatasetInstance?>(GetInstanceKey(datasetKey, winner.Value.Id), null, cancellationToken);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
 
-            await SaveInstanceUnlockedAsync(instance, cancellationToken);
+    public async Task<(Guid Id, int Version)?> GetLatestInstanceVersionAsync(string datasetKey, string state, CancellationToken cancellationToken)
+    {
+        await _semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            var normalizedDataset = EncodeFileKey(datasetKey);
+            var normalizedState = DatasetHeaderPartitioning.NormalizeStateFilter(state);
+            if (normalizedState is null) return null;
+            return await FindLatestWinnerAsync(normalizedDataset, normalizedState, cancellationToken);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    /// <summary>
+    /// Reads the header file(s) for the most recent date in the given state prefix and returns
+    /// the winning instance ID and version. Always reads at least one header blob so the version
+    /// is accurate — necessary for cache-staleness detection on in-place updates.
+    /// Must be called inside the semaphore.
+    /// </summary>
+    private async Task<(Guid Id, int Version)?> FindLatestWinnerAsync(string normalizedDataset, string normalizedState, CancellationToken cancellationToken)
+    {
+        var statePrefix = BuildKey($"instances/{normalizedDataset}/{DatasetHeaderPartitioning.HeadersFolderName}/{normalizedState}/");
+        var allKeys = await ListKeysByPrefixAsync(statePrefix, cancellationToken);
+
+        var parsedKeys = allKeys
+            .Where(k => k.EndsWith(HeaderFileSuffix, StringComparison.OrdinalIgnoreCase))
+            .Select(k => TryParseHeaderKey(k, out _, out var date, out var id) ? (k, date, id) : ((string, DateOnly, Guid)?)null)
+            .OfType<(string key, DateOnly date, Guid id)>()
+            .OrderByDescending(x => x.date)
+            .ToList();
+
+        if (parsedKeys.Count == 0) return null;
+
+        var mostRecentDate = parsedKeys[0].date;
+        var sameDate = parsedKeys.TakeWhile(x => x.date == mostRecentDate).ToList();
+
+        // Always read the header file(s) — ID alone is not sufficient since in-place updates
+        // (ReplaceInstanceAsync) keep the same Guid but increment the version.
+        DatasetInstanceHeaderIndex? winner = null;
+        foreach (var (key, _, _) in sameDate)
+        {
+            var header = await ReadJsonAsync<DatasetInstanceHeaderIndex?>(key, null, cancellationToken);
+            if (header is not null && (winner is null || header.Version > winner.Version))
+                winner = header;
+        }
+        return winner is null ? null : (winner.Id, winner.Version);
+    }
+
+    public async Task<bool> ReplaceInstanceAsync(DatasetInstance instance, CancellationToken cancellationToken, DatasetInstance? existing = null)
+    {
+        await _semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            if (existing is null && !await ObjectExistsAsync(GetInstanceKey(instance.DatasetKey, instance.Id), cancellationToken))
+                return false;
+
+            await SaveInstanceUnlockedAsync(instance, cancellationToken, existing);
             return true;
         }
         finally
@@ -207,7 +288,6 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         await _semaphore.WaitAsync(cancellationToken);
         try
         {
-            await EnsureLegacyAuditMigratedAsync(cancellationToken);
             var audit = new List<AuditEvent>();
             var auditPrefix = string.IsNullOrWhiteSpace(datasetKey)
                 ? GetAuditRootPrefix()
@@ -233,13 +313,31 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         }
     }
 
-    public async Task AddAuditEventAsync(AuditEvent auditEvent, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<AuditEvent>> GetInstanceAuditHistoryAsync(string datasetKey, Guid instanceId, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
         try
         {
-            await EnsureLegacyAuditMigratedAsync(cancellationToken);
-            await WriteJsonAsync(GetAuditEventKey(auditEvent), auditEvent, cancellationToken);
+            var prefix = GetAuditInstancePrefix(datasetKey, instanceId);
+            var keys = await ListKeysByPrefixAsync(prefix, cancellationToken);
+
+            // Sort descending by filename — timestamp prefix makes lexicographic order == chronological order.
+            var sortedKeys = keys
+                .Where(k => k.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(k => k, StringComparer.Ordinal)
+                .ToList();
+
+            var result = new List<AuditEvent>();
+            foreach (var key in sortedKeys)
+            {
+                var entry = await ReadJsonAsync<AuditEvent?>(key, null, cancellationToken);
+                if (entry is null) continue;
+                result.Add(entry);
+                // Stop once we've passed the most recent signoff — everything older is irrelevant.
+                if (string.Equals(entry.Action, "INSTANCE_SIGNOFF", StringComparison.OrdinalIgnoreCase))
+                    break;
+            }
+            return result;
         }
         finally
         {
@@ -247,24 +345,17 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         }
     }
 
-    private async Task EnsureLegacyAuditMigratedAsync(CancellationToken cancellationToken)
+    public async Task AddAuditEventAsync(AuditEvent auditEvent, CancellationToken cancellationToken)
     {
-        if (_legacyAuditMigrated)
+        await _semaphore.WaitAsync(cancellationToken);
+        try
         {
-            return;
+            await WriteJsonAsync(GetAuditEventKey(auditEvent), auditEvent, cancellationToken);
         }
-
-        var legacyAudit = await ReadJsonAsync(GetLegacyAuditKey(), new List<AuditEvent>(), cancellationToken);
-        foreach (var auditEvent in legacyAudit)
+        finally
         {
-            var targetKey = GetAuditEventKey(auditEvent);
-            if (!await ObjectExistsAsync(targetKey, cancellationToken))
-            {
-                await WriteJsonAsync(targetKey, auditEvent, cancellationToken);
-            }
+            _semaphore.Release();
         }
-
-        _legacyAuditMigrated = true;
     }
 
     private async Task<DatasetReadTrace> ReadInstancesForDatasetWithTraceAsync(
@@ -280,10 +371,16 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         var instancePrefix = BuildKey($"instances/{normalizedDataset}/");
         var headersPrefix = BuildKey($"instances/{normalizedDataset}/headers/");
 
-        var headerKeys = (await ListKeysByPrefixAsync(headersPrefix, cancellationToken))
-            .Where(k => k.EndsWith(HeaderFileSuffix, StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        List<BlobEntry>? allHeaderKeys = null;
+        async Task<List<BlobEntry>> EnsureAllHeaderKeysAsync()
+        {
+            if (allHeaderKeys is not null) return allHeaderKeys;
+            allHeaderKeys = (await ListKeysByPrefixWithMetadataAsync(headersPrefix, cancellationToken))
+                .Where(e => e.Key.EndsWith(HeaderFileSuffix, StringComparison.OrdinalIgnoreCase))
+                .Distinct()
+                .ToList();
+            return allHeaderKeys;
+        }
 
         var detailKeys = new List<string>();
         Dictionary<Guid, string>? fullKeysById = null;
@@ -318,7 +415,7 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
             if (!includeDetails)
             {
                 return await ReadHeaderOnlyWithoutFiltersAsync(
-                    headerKeys,
+                    await EnsureAllHeaderKeysAsync(),
                     normalizedCriteria,
                     EnsureDetailKeysByIdAsync,
                     GetDetailFilesTotal,
@@ -349,7 +446,7 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
                 Instances = items,
                 LoadedFilenames = loaded,
                 HeaderFilesRead = 0,
-                HeaderFilesTotal = headerKeys.Count,
+                HeaderFilesTotal = (await EnsureAllHeaderKeysAsync()).Count,
                 DetailFilesRead = detailKeys.Count,
                 DetailFilesTotal = loadedFullKeysById.Count,
                 CandidateHeaderFilesConsidered = 0,
@@ -369,25 +466,25 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
 
         var candidateHeaderKeys = await GetCandidateHeaderKeysAsync(
             normalizedDataset,
-            headerKeys,
+            EnsureAllHeaderKeysAsync,
             minAsOfDate,
             maxAsOfDate,
             normalizedState,
             cancellationToken);
 
-        foreach (var headerKey in candidateHeaderKeys)
+        foreach (var headerEntry in candidateHeaderKeys)
         {
-            if (!TryParseHeaderKey(headerKey, out _, out _, out var instanceId))
+            if (!TryParseHeaderKey(headerEntry.Key, out _, out _, out var instanceId))
             {
                 continue;
             }
 
-            var header = await ReadJsonAsync<DatasetInstanceHeaderIndex?>(headerKey, null, cancellationToken);
+            var header = await ReadHeaderIndexCachedAsync(headerEntry.Key, headerEntry.LastModified, cancellationToken);
             var isMatch = header is not null && HeaderIndexMatches(header, minAsOfDate, maxAsOfDate, normalizedState, normalizedCriteria);
             headerFilesRead += 1;
             loadedFiles.Add(new DatasetLoadedFileTrace
             {
-                FileName = ToDatasetTracePath(headerKey),
+                FileName = ToDatasetTracePath(headerEntry.Key),
                 Reason = $"Header candidate evaluated against filters. lookedFor=[{FormatTraceSearchCriteria(minAsOfDate, maxAsOfDate, normalizedState, normalizedCriteria)}]; found=[{FormatHeaderIndexForTrace(header)}]; matched={isMatch.ToString().ToLowerInvariant()}."
             });
 
@@ -410,7 +507,9 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
                         {
                             cachedInstances[detailKey] = instance;
                             var refreshedHeader = CreateHeaderIndex(instance);
-                            await WriteJsonAsync(GetHeaderKey(instance.DatasetKey, refreshedHeader.State, refreshedHeader.AsOfDate, refreshedHeader.Id), refreshedHeader, cancellationToken);
+                            var refreshedKey = GetHeaderKey(instance.DatasetKey, refreshedHeader.State, refreshedHeader.AsOfDate, refreshedHeader.Id);
+                            await WriteHeaderIndexCachedAsync(refreshedKey, refreshedHeader, cancellationToken);
+
                             headerFilesRebuilt += 1;
                             header = refreshedHeader;
                         }
@@ -426,16 +525,16 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
             ? await EnsureDetailKeysByIdAsync()
             : fullKeysById;
 
-        var indexedIds = headerKeys
-            .Select(k => Path.GetFileName(k))
-            .Where(name => name.EndsWith(HeaderFileSuffix, StringComparison.OrdinalIgnoreCase))
-            .Select(name => name[..^HeaderFileSuffix.Length])
-            .Where(idText => Guid.TryParseExact(idText, "N", out _))
-            .Select(idText => Guid.ParseExact(idText, "N"))
-            .ToHashSet();
-
         if (includeDetails)
         {
+            var indexedIds = (await EnsureAllHeaderKeysAsync())
+                .Select(e => Path.GetFileName(e.Key))
+                .Where(name => name.EndsWith(HeaderFileSuffix, StringComparison.OrdinalIgnoreCase))
+                .Select(name => name[..^HeaderFileSuffix.Length])
+                .Where(idText => Guid.TryParseExact(idText, "N", out _))
+                .Select(idText => Guid.ParseExact(idText, "N"))
+                .ToHashSet();
+
             foreach (var entry in loadedFullKeysByIdForDetails!)
             {
                 if (indexedIds.Contains(entry.Key))
@@ -458,7 +557,9 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
 
                 cachedInstances[entry.Value] = instance;
                 var header = CreateHeaderIndex(instance);
-                await WriteJsonAsync(GetHeaderKey(instance.DatasetKey, header.State, header.AsOfDate, header.Id), header, cancellationToken);
+                var missingHeaderKey = GetHeaderKey(instance.DatasetKey, header.State, header.AsOfDate, header.Id);
+                await WriteHeaderIndexCachedAsync(missingHeaderKey, header, cancellationToken);
+
                 headerFilesRebuilt += 1;
 
                 if (HeaderIndexMatches(header, minAsOfDate, maxAsOfDate, normalizedState, normalizedCriteria))
@@ -517,7 +618,8 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
                     && DatasetHeaderPartitioning.HasHeaderHashMismatch(matchedHeader.HeaderHash, instance.Header))
                 {
                     var refreshedHeader = CreateHeaderIndex(instance);
-                    await WriteJsonAsync(GetHeaderKey(instance.DatasetKey, refreshedHeader.State, refreshedHeader.AsOfDate, refreshedHeader.Id), refreshedHeader, cancellationToken);
+                    var mismatchHeaderKey = GetHeaderKey(instance.DatasetKey, refreshedHeader.State, refreshedHeader.AsOfDate, refreshedHeader.Id);
+                    await WriteHeaderIndexCachedAsync(mismatchHeaderKey, refreshedHeader, cancellationToken);
                     headerFilesRebuilt += 1;
                     loadedFiles.Add(new DatasetLoadedFileTrace
                     {
@@ -540,7 +642,7 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
             Instances = resultInstances,
             LoadedFilenames = loadedFiles,
             HeaderFilesRead = headerFilesRead,
-            HeaderFilesTotal = headerKeys.Count,
+            HeaderFilesTotal = allHeaderKeys?.Count ?? candidateHeaderKeys.Count,
             DetailFilesRead = detailFilesRead,
             DetailFilesTotal = GetDetailFilesTotal(),
             CandidateHeaderFilesConsidered = candidateHeaderKeys.Count,
@@ -551,7 +653,7 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
     }
 
     private async Task<DatasetReadTrace> ReadHeaderOnlyWithoutFiltersAsync(
-        List<string> headerKeys,
+        List<BlobEntry> headerKeys,
         IReadOnlyDictionary<string, string> normalizedCriteria,
         Func<Task<Dictionary<Guid, string>>> ensureDetailKeysByIdAsync,
         Func<int> getDetailFilesTotal,
@@ -562,16 +664,16 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         var detailFilesRead = 0;
         var headerFilesRebuilt = 0;
 
-        foreach (var headerKey in headerKeys)
+        foreach (var headerEntry in headerKeys)
         {
-            var header = await ReadJsonAsync<DatasetInstanceHeaderIndex?>(headerKey, null, cancellationToken);
+            var header = await ReadHeaderIndexCachedAsync(headerEntry.Key, headerEntry.LastModified, cancellationToken);
             if (header is null)
             {
                 continue;
             }
 
             if (RequiresSummaryBackfill(header)
-                && TryParseHeaderKey(headerKey, out _, out _, out var instanceId)
+                && TryParseHeaderKey(headerEntry.Key, out _, out _, out var instanceId)
                 && (await ensureDetailKeysByIdAsync()).TryGetValue(instanceId, out var detailKey))
             {
                 var instance = await ReadJsonAsync<DatasetInstance?>(detailKey, null, cancellationToken);
@@ -585,7 +687,8 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
                 if (instance is not null)
                 {
                     var refreshedHeader = CreateHeaderIndex(instance);
-                    await WriteJsonAsync(GetHeaderKey(instance.DatasetKey, refreshedHeader.State, refreshedHeader.AsOfDate, refreshedHeader.Id), refreshedHeader, cancellationToken);
+                    var noFilterRebuildKey = GetHeaderKey(instance.DatasetKey, refreshedHeader.State, refreshedHeader.AsOfDate, refreshedHeader.Id);
+                    await WriteHeaderIndexCachedAsync(noFilterRebuildKey, refreshedHeader, cancellationToken);
                     headerFilesRebuilt += 1;
                     header = refreshedHeader;
                 }
@@ -594,7 +697,7 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
             var isMatch = HeaderIndexMatches(header, null, null, null, normalizedCriteria);
             loaded.Add(new DatasetLoadedFileTrace
             {
-                FileName = ToDatasetTracePath(headerKey),
+                FileName = ToDatasetTracePath(headerEntry.Key),
                 Reason = $"Header candidate evaluated against filters. lookedFor=[{FormatTraceSearchCriteria(null, null, null, normalizedCriteria)}]; found=[{FormatHeaderIndexForTrace(header)}]; matched={isMatch.ToString().ToLowerInvariant()}."
             });
 
@@ -619,80 +722,46 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         };
     }
 
-    private async Task<List<string>> GetCandidateHeaderKeysAsync(
+    private async Task<List<BlobEntry>> GetCandidateHeaderKeysAsync(
         string normalizedDataset,
-        List<string> allHeaderKeys,
+        Func<Task<List<BlobEntry>>> getAllHeaderKeys,
         DateOnly? minAsOfDate,
         DateOnly? maxAsOfDate,
         string? normalizedState,
         CancellationToken cancellationToken)
     {
-        // For bounded ranges, list only matching state/date partition prefixes.
-        if (minAsOfDate.HasValue && maxAsOfDate.HasValue)
+        // When a state filter is present, query only that state's directory.
+        // If min and max dates are the same specific date, include it in the prefix to read only
+        // that date's folder (e.g. signoff duplicate-check: Official/2025-07-01/* instead of Official/*).
+        if (normalizedState is not null)
         {
-            var spanDays = maxAsOfDate.Value.DayNumber - minAsOfDate.Value.DayNumber;
-            if (spanDays >= 0 && spanDays <= 400)
-            {
-                return await ListCandidateHeaderKeysByRangePrefixesAsync(
-                    normalizedDataset,
-                    allHeaderKeys,
-                    minAsOfDate.Value,
-                    maxAsOfDate.Value,
-                    normalizedState,
-                    cancellationToken);
-            }
+            var statePrefix = minAsOfDate.HasValue && minAsOfDate == maxAsOfDate
+                ? BuildKey($"instances/{normalizedDataset}/{DatasetHeaderPartitioning.HeadersFolderName}/{normalizedState}/{minAsOfDate.Value:yyyy-MM-dd}/")
+                : BuildKey($"instances/{normalizedDataset}/{DatasetHeaderPartitioning.HeadersFolderName}/{normalizedState}/");
+            var stateEntries = await ListKeysByPrefixWithMetadataAsync(statePrefix, cancellationToken);
+            return stateEntries
+                .Where(e => e.Key.EndsWith(HeaderFileSuffix, StringComparison.OrdinalIgnoreCase)
+                    && TryParseHeaderKey(e.Key, out _, out var date, out _)
+                    && (!minAsOfDate.HasValue || date >= minAsOfDate.Value)
+                    && (!maxAsOfDate.HasValue || date <= maxAsOfDate.Value))
+                .ToList();
         }
 
-        return GetCandidateHeaderKeysByFiltering(allHeaderKeys, minAsOfDate, maxAsOfDate, normalizedState);
+        return GetCandidateHeaderKeysByFiltering(await getAllHeaderKeys(), minAsOfDate, maxAsOfDate, normalizedState);
     }
 
-    private async Task<List<string>> ListCandidateHeaderKeysByRangePrefixesAsync(
-        string normalizedDataset,
-        List<string> allHeaderKeys,
-        DateOnly minAsOfDate,
-        DateOnly maxAsOfDate,
-        string? normalizedState,
-        CancellationToken cancellationToken)
-    {
-        if (normalizedState is null)
-        {
-            return GetCandidateHeaderKeysByFiltering(allHeaderKeys, minAsOfDate, maxAsOfDate, normalizedState);
-        }
-
-        var stateTokens = new List<string> { normalizedState };
-
-        var keys = new List<string>();
-        for (var day = minAsOfDate.DayNumber; day <= maxAsOfDate.DayNumber; day++)
-        {
-            var date = DateOnly.FromDayNumber(day);
-            var dateToken = DatasetHeaderPartitioning.DatePartitionToken(date);
-
-            foreach (var stateToken in stateTokens)
-            {
-                var prefix = BuildKey($"instances/{normalizedDataset}/{DatasetHeaderPartitioning.HeadersFolderName}/{stateToken}/{dateToken}/");
-                var matchingKeys = await ListKeysByPrefixAsync(prefix, cancellationToken);
-                keys.AddRange(matchingKeys.Where(k => k.EndsWith(HeaderFileSuffix, StringComparison.OrdinalIgnoreCase)));
-            }
-        }
-
-        return keys
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-    }
-
-    private List<string> GetCandidateHeaderKeysByFiltering(List<string> allHeaderKeys, DateOnly? minAsOfDate, DateOnly? maxAsOfDate, string? normalizedState)
+    private List<BlobEntry> GetCandidateHeaderKeysByFiltering(List<BlobEntry> allHeaderKeys, DateOnly? minAsOfDate, DateOnly? maxAsOfDate, string? normalizedState)
     {
         return allHeaderKeys
-            .Where(key =>
+            .Where(entry =>
             {
-                if (!TryParseHeaderKey(key, out var stateToken, out var date, out _))
+                if (!TryParseHeaderKey(entry.Key, out var stateToken, out var date, out _))
                 {
                     return false;
                 }
 
                 return DatasetHeaderPartitioning.IsCandidatePartition(date, stateToken, minAsOfDate, maxAsOfDate, normalizedState);
             })
-            .Distinct(StringComparer.Ordinal)
             .ToList();
     }
 
@@ -701,33 +770,41 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         var keys = await GetHeaderIndexKeysForInstanceAsync(datasetKey, instanceId, cancellationToken);
         foreach (var key in keys)
         {
-            await DeleteIfExistsAsync(key, cancellationToken);
+            await DeleteHeaderIndexCachedAsync(key, cancellationToken);
         }
     }
 
-    private async Task SaveInstanceUnlockedAsync(DatasetInstance instance, CancellationToken cancellationToken)
+    private async Task SaveInstanceUnlockedAsync(DatasetInstance instance, CancellationToken cancellationToken, DatasetInstance? existing = null, bool isNew = false)
     {
         var header = CreateHeaderIndex(instance);
         var targetHeaderKey = GetHeaderKey(instance.DatasetKey, header.State, header.AsOfDate, instance.Id);
-        var existingHeaderKeys = await GetHeaderIndexKeysForInstanceAsync(instance.DatasetKey, instance.Id, cancellationToken);
 
-        foreach (var existingKey in existingHeaderKeys.Where(k => !string.Equals(k, targetHeaderKey, StringComparison.OrdinalIgnoreCase)))
+        if (!isNew)
         {
-            await DeleteIfExistsAsync(existingKey, cancellationToken);
-        }
-
-        await WriteJsonAsync(GetInstanceKey(instance.DatasetKey, instance.Id), instance, cancellationToken);
-
-        if (existingHeaderKeys.Any(k => string.Equals(k, targetHeaderKey, StringComparison.OrdinalIgnoreCase)))
-        {
-            var existingHeader = await ReadJsonAsync<DatasetInstanceHeaderIndex?>(targetHeaderKey, null, cancellationToken);
-            if (existingHeader is not null && HeaderIndexEquals(existingHeader, header))
+            if (existing is not null)
             {
-                return;
+                // Fast path: compute the old header key directly — no broad query needed.
+                var oldHeaderKey = GetHeaderKey(existing.DatasetKey, existing.State, existing.AsOfDate, existing.Id);
+                if (!string.Equals(oldHeaderKey, targetHeaderKey, StringComparison.OrdinalIgnoreCase))
+                    await DeleteHeaderIndexCachedAsync(oldHeaderKey, cancellationToken);
+            }
+            else
+            {
+                var existingHeaderKeys = await GetHeaderIndexKeysForInstanceAsync(instance.DatasetKey, instance.Id, cancellationToken);
+                foreach (var existingKey in existingHeaderKeys.Where(k => !string.Equals(k, targetHeaderKey, StringComparison.OrdinalIgnoreCase)))
+                    await DeleteHeaderIndexCachedAsync(existingKey, cancellationToken);
+
+                if (existingHeaderKeys.Any(k => string.Equals(k, targetHeaderKey, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var existingHeader = await ReadHeaderIndexCachedAsync(targetHeaderKey, DateTimeOffset.MaxValue, cancellationToken);
+                    if (existingHeader is not null && HeaderIndexEquals(existingHeader, header))
+                        return;
+                }
             }
         }
 
-        await WriteJsonAsync(targetHeaderKey, header, cancellationToken);
+        await WriteJsonAsync(GetInstanceKey(instance.DatasetKey, instance.Id), instance, cancellationToken);
+        await WriteHeaderIndexCachedAsync(targetHeaderKey, header, cancellationToken);
     }
 
     private async Task<List<string>> GetHeaderIndexKeysForInstanceAsync(string datasetKey, Guid instanceId, CancellationToken cancellationToken)
@@ -736,18 +813,10 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         var keys = await ListKeysByPrefixAsync(prefix, cancellationToken);
         var suffix = $"/{instanceId:N}{HeaderFileSuffix}";
 
-        var result = keys
+        return keys
             .Where(k => k.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-
-        var legacyKey = BuildKey($"instances/{EncodeFileKey(datasetKey)}/{instanceId:N}{HeaderFileSuffix}");
-        if (!result.Contains(legacyKey, StringComparer.OrdinalIgnoreCase) && await ObjectExistsAsync(legacyKey, cancellationToken))
-        {
-            result.Add(legacyKey);
-        }
-
-        return result;
     }
 
     private static DatasetInstanceHeaderIndex CreateHeaderIndex(DatasetInstance instance)
@@ -816,8 +885,8 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
                 x => (object?)x.Value,
                 StringComparer.OrdinalIgnoreCase),
             Rows = [],
-            CreatedBy = header.CreatedBy,
-            CreatedAtUtc = header.CreatedAtUtc,
+            CreatedBy = string.IsNullOrWhiteSpace(header.CreatedBy) ? "unknown" : header.CreatedBy,
+            CreatedAtUtc = header.CreatedAtUtc == default ? DateTimeOffset.UnixEpoch : header.CreatedAtUtc,
             LastModifiedBy = string.IsNullOrWhiteSpace(header.LastModifiedBy) ? "unknown" : header.LastModifiedBy,
             LastModifiedAtUtc = header.LastModifiedAtUtc == default ? DateTimeOffset.UnixEpoch : header.LastModifiedAtUtc
         };
@@ -902,9 +971,6 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
     private string GetSchemaKey(string datasetKey)
         => BuildKey($"schemas/{EncodeFileKey(datasetKey)}.json");
 
-    private string GetLegacyAuditKey()
-        => BuildKey("audit-events.json");
-
     private string GetAuditRootPrefix()
         => BuildKey("audit/");
 
@@ -920,8 +986,15 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
             ? "UNKNOWN_ACTION"
             : EncodeFileKey(auditEvent.Action);
         var timestamp = auditEvent.OccurredAtUtc.UtcDateTime.ToString("yyyyMMddTHHmmssfffffff", CultureInfo.InvariantCulture);
+        // Instance-scoped events go in a subfolder keyed by instance ID so that
+        // GetInstanceAuditHistoryAsync can query only the events for a specific instance.
+        if (auditEvent.DatasetInstanceId.HasValue)
+            return BuildKey($"audit/{datasetFolder}/{auditEvent.DatasetInstanceId.Value:N}/{timestamp}_{actionToken}_{auditEvent.Id:N}.json");
         return BuildKey($"audit/{datasetFolder}/{timestamp}_{actionToken}_{auditEvent.Id:N}.json");
     }
+
+    private string GetAuditInstancePrefix(string datasetKey, Guid instanceId)
+        => BuildKey($"audit/{EncodeFileKey(datasetKey)}/{instanceId:N}/");
 
     private string GetInstanceKey(string datasetKey, Guid instanceId)
         => BuildKey($"instances/{EncodeFileKey(datasetKey)}/{instanceId:N}.json");
@@ -946,6 +1019,15 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         var keys = await _blobStore.QueryBlobsAsync($"{prefix}*", cancellationToken);
         return keys
             .Where(k => k.StartsWith(prefix, StringComparison.Ordinal))
+            .ToList();
+    }
+
+    private async Task<List<BlobEntry>> ListKeysByPrefixWithMetadataAsync(string prefix, CancellationToken cancellationToken)
+    {
+        ApiRequestIoStats.IncrementQuery();
+        var entries = await _blobStore.QueryBlobsWithMetadataAsync($"{prefix}*", cancellationToken);
+        return entries
+            .Where(e => e.Key.StartsWith(prefix, StringComparison.Ordinal))
             .ToList();
     }
 
@@ -983,6 +1065,36 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         ApiRequestIoStats.IncrementDelete(key);
         await _blobStore.DeleteBlobAsync(key, cancellationToken);
     }
+
+    private async Task<DatasetInstanceHeaderIndex?> ReadHeaderIndexCachedAsync(string key, DateTimeOffset lastModified, CancellationToken cancellationToken)
+    {
+        if (_headerIndexCache.TryGetValue(key, out var cached))
+        {
+            // DateTimeOffset.MaxValue = written by this process this session — always fresh.
+            // Otherwise trust the cache only when the blob's last-modified hasn't changed.
+            if (cached.LastModified == DateTimeOffset.MaxValue || cached.LastModified == lastModified)
+                return cached.Header;
+            _headerIndexCache.Remove(key);
+        }
+        var header = await ReadJsonAsync<DatasetInstanceHeaderIndex?>(key, null, cancellationToken);
+        if (header is not null)
+            _headerIndexCache[key] = (header, lastModified);
+        return header;
+    }
+
+    private async Task WriteHeaderIndexCachedAsync(string key, DatasetInstanceHeaderIndex value, CancellationToken cancellationToken)
+    {
+        // Sentinel: written by this process — treat as always fresh until another client modifies it.
+        _headerIndexCache[key] = (value, DateTimeOffset.MaxValue);
+        await WriteJsonAsync(key, value, cancellationToken);
+    }
+
+    private async Task DeleteHeaderIndexCachedAsync(string key, CancellationToken cancellationToken)
+    {
+        _headerIndexCache.Remove(key);
+        await DeleteIfExistsAsync(key, cancellationToken);
+    }
+
 
     private bool TryParseHeaderKey(string key, out string stateToken, out DateOnly date, out Guid instanceId)
     {
@@ -1037,16 +1149,6 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         return Uri.EscapeDataString(datasetKey.Trim().ToUpperInvariant());
     }
 
-    private static string ToDatasetRelativePath(string datasetPrefix, string fullKey)
-    {
-        if (fullKey.StartsWith(datasetPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return fullKey[datasetPrefix.Length..];
-        }
-
-        return fullKey;
-    }
-
     private static string ToDatasetTracePath(string fullKey)
     {
         var normalized = fullKey.Replace('\\', '/');
@@ -1079,8 +1181,8 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         public Dictionary<string, string> Header { get; init; } = new(StringComparer.OrdinalIgnoreCase);
         public string? HeaderHash { get; init; }
         public int Version { get; init; }
-        public string? CreatedBy { get; init; }
-        public DateTimeOffset? CreatedAtUtc { get; init; }
+        public string CreatedBy { get; init; } = string.Empty;
+        public DateTimeOffset CreatedAtUtc { get; init; }
         public string LastModifiedBy { get; init; } = string.Empty;
         public DateTimeOffset LastModifiedAtUtc { get; init; }
     }

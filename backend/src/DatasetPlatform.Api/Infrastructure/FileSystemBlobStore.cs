@@ -82,11 +82,31 @@ public sealed class FileSystemBlobStore(IOptions<StorageOptions> options) : IBlo
         var files = Directory
             .EnumerateFiles(searchRoot, "*", SearchOption.AllDirectories)
             .Where(path => regex.IsMatch(path.Replace('/', '\\')))
-            .Select(path => Path.GetRelativePath(_basePath, path)
-                .Replace('\\', '/'))
+            .Select(path => Path.GetRelativePath(_basePath, path).Replace('\\', '/'))
             .ToList();
 
         return Task.FromResult<IReadOnlyList<string>>(files);
+    }
+
+    public Task<IReadOnlyList<BlobEntry>> QueryBlobsWithMetadataAsync(string wildcardPattern, CancellationToken cancellationToken)
+    {
+        var absolutePattern = ResolvePath(wildcardPattern);
+        var searchRoot = GetSearchRoot(absolutePattern);
+        if (!Directory.Exists(searchRoot))
+        {
+            return Task.FromResult<IReadOnlyList<BlobEntry>>([]);
+        }
+
+        var regex = WildcardToRegex(absolutePattern.Replace('/', '\\'));
+        var entries = Directory
+            .EnumerateFiles(searchRoot, "*", SearchOption.AllDirectories)
+            .Where(path => regex.IsMatch(path.Replace('/', '\\')))
+            .Select(path => new BlobEntry(
+                Path.GetRelativePath(_basePath, path).Replace('\\', '/'),
+                new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero)))
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<BlobEntry>>(entries);
     }
 
     private string ResolvePath(string path)
