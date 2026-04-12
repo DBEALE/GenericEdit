@@ -31,11 +31,22 @@ public sealed class AuditController(IDatasetService datasetService, IRequestUser
     /// Non-admin users must always supply this parameter.
     /// </param>
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<AuditEvent>>> GetAudit([FromQuery] string? datasetKey, [FromQuery] Guid? instanceId, CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<AuditEvent>>> GetAudit(
+        [FromQuery] string? datasetKey,
+        [FromQuery] Guid? instanceId,
+        [FromQuery] DateOnly? minOccurredDate,
+        [FromQuery] DateOnly? maxOccurredDate,
+        CancellationToken cancellationToken)
     {
         try
         {
-            var records = await datasetService.GetAuditAsync(userContextAccessor.GetCurrent(), cancellationToken, datasetKey, instanceId);
+            var records = await datasetService.GetAuditAsync(
+                userContextAccessor.GetCurrent(),
+                cancellationToken,
+                datasetKey,
+                instanceId,
+                minOccurredDate,
+                maxOccurredDate);
             return Ok(records);
         }
         catch (DatasetServiceException ex)

@@ -29,6 +29,12 @@ public sealed class SchemaField
     public bool Required { get; init; }
 
     /// <summary>
+    /// Optional default value applied by clients when creating a new empty header or detail row.
+    /// Stored as text and interpreted according to <see cref="Type"/> by the UI.
+    /// </summary>
+    public string? DefaultValue { get; init; }
+
+    /// <summary>
     /// Maximum number of characters allowed. Only applies when <see cref="Type"/> is <see cref="FieldType.String"/>.
     /// </summary>
     public int? MaxLength { get; init; }

@@ -6,6 +6,7 @@ export interface SchemaField {
   type: 'String' | 'Number' | 'Date' | 'Boolean' | 'Select' | 'Lookup';
   isKey: boolean;
   required: boolean;
+  defaultValue?: string;
   maxLength?: number;
   minValue?: number;
   maxValue?: number;
@@ -20,10 +21,20 @@ export interface DatasetPermissions {
   datasetAdminRoles: string[];
 }
 
+export interface Catalogue {
+  key: string;
+  name: string;
+  description: string;
+  headerFields: SchemaField[];
+  createdAtUtc?: string;
+  updatedAtUtc?: string;
+}
+
 export interface DatasetSchema {
   key: string;
   name: string;
   description: string;
+  catalogueKey?: string;
   headerFields: SchemaField[];
   detailFields: SchemaField[];
   permissions: DatasetPermissions;
@@ -95,6 +106,9 @@ export interface AuditEvent {
   action: string;
   datasetKey: string;
   datasetInstanceId?: string;
+  asOfDate?: string;
+  state?: string;
+  instanceHeader?: Record<string, string>;
   rowChanges?: AuditRowChange[];
 }
 

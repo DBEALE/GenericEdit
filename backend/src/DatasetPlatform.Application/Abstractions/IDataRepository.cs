@@ -91,13 +91,31 @@ public interface IDataRepository
     /// </summary>
     Task<bool> DeleteInstanceAsync(string datasetKey, Guid instanceId, CancellationToken cancellationToken);
 
+    // ─── Catalogue operations ────────────────────────────────────────────────────
+
+    /// <summary>Returns all catalogues, ordered by key ascending.</summary>
+    Task<IReadOnlyList<Catalogue>> GetCataloguesAsync(CancellationToken cancellationToken);
+
+    /// <summary>Returns the catalogue for <paramref name="catalogueKey"/>, or <c>null</c> if not found.</summary>
+    Task<Catalogue?> GetCatalogueAsync(string catalogueKey, CancellationToken cancellationToken);
+
+    /// <summary>Creates or replaces a catalogue.</summary>
+    Task UpsertCatalogueAsync(Catalogue catalogue, CancellationToken cancellationToken);
+
+    /// <summary>Deletes a catalogue. Schemas that reference it retain their key; they become uncatalogued.</summary>
+    Task DeleteCatalogueAsync(string catalogueKey, CancellationToken cancellationToken);
+
     // ─── Audit operations ────────────────────────────────────────────────────────
 
     /// <summary>
     /// Returns all audit events, optionally filtered to a specific dataset key.
     /// Results are ordered by <see cref="AuditEvent.OccurredAtUtc"/> descending.
     /// </summary>
-    Task<IReadOnlyList<AuditEvent>> GetAuditEventsAsync(string? datasetKey, CancellationToken cancellationToken);
+    Task<IReadOnlyList<AuditEvent>> GetAuditEventsAsync(
+        string? datasetKey,
+        CancellationToken cancellationToken,
+        DateOnly? minOccurredDate = null,
+        DateOnly? maxOccurredDate = null);
 
     /// <summary>
     /// Returns audit events for a specific instance, newest first, stopping after the most recent signoff.

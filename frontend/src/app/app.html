@@ -38,47 +38,228 @@
 
   <main class="grid-layout" [class.page-hidden]="currentPage() !== 'editor'">
     <aside class="panel catalog">
-      <h2>Dataset Catalog</h2>
-      <button type="button" class="catalog-create-btn" (click)="createNewDataset()" [disabled]="!canCreateSchema()">+ New Dataset</button>
-      <div class="catalog-search-wrap">
-        <input
-          type="text"
-          class="catalog-search"
-          placeholder="Search datasets..."
-          [ngModel]="datasetSearch()"
-          (ngModelChange)="datasetSearch.set($event)" />
-        @if (datasetSearch()) {
-          <button type="button" class="catalog-search-clear" (click)="datasetSearch.set('')" title="Clear search">✕</button>
-        }
-      </div>
-      <div class="dataset-list">
-        @for (schema of filteredSchemas(); track schema.key) {
-          <div class="dataset-entry">
+      <section class="catalog-section">
+        <div class="catalog-section-header">
+          <h3>Catalogue</h3>
+          @if (canManageCatalogues()) {
             <button
               type="button"
-              class="dataset-item"
-              [class.active]="selectedSchemaKey() === schema.key"
-              (click)="selectSchema(schema.key)">
-              <strong>{{ schema.name }}</strong>
-              <span>{{ schema.key }}</span>
-            </button>
-            @if (canManageSchema(schema)) {
-              <button
-                type="button"
-                class="danger icon-delete-btn catalog-delete-btn"
-                aria-label="Delete dataset"
-                title="Delete dataset"
-                (click)="deleteDatasetSchema(schema.key, $event)">✕</button>
+              class="mini"
+              [class.active]="catalogueConfigMode()"
+              (click)="toggleCatalogueConfigMode()"
+              title="Configure catalogues">&#9881;</button>
+          }
+        </div>
+
+        @if (!catalogueConfigMode()) {
+          <select
+            class="catalogue-filter-select"
+            [ngModel]="selectedCatalogueKey()"
+            (ngModelChange)="selectedCatalogueKey.set($event)">
+            <option [ngValue]="null">All catalogues</option>
+            @for (cat of catalogues(); track cat.key) {
+              <option [ngValue]="cat.key">{{ cat.name }}</option>
+            }
+          </select>
+        } @else {
+          <div class="catalogue-new-row">
+            <input type="text" placeholder="New catalogue name…" [ngModel]="newCatalogueName()" (ngModelChange)="newCatalogueName.set($event)" (keydown.enter)="addCatalogue()" />
+            <button type="button" class="mini" (click)="addCatalogue()" [disabled]="!newCatalogueName().trim()">Add</button>
+          </div>
+          <div class="catalogue-list">
+            @for (cat of catalogues(); track cat.key) {
+              <div class="dataset-entry">
+                <button
+                  type="button"
+                  class="dataset-item"
+                  [class.active]="selectedCatalogueKey() === cat.key && activePaneMode() === 'catalogue'"
+                  (click)="selectCatalogue(cat.key)">
+                  <strong>{{ cat.name }}</strong>
+                  <span>{{ cat.key }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="danger icon-delete-btn catalog-delete-btn"
+                  aria-label="Delete catalogue"
+                  title="Delete catalogue"
+                  (click)="deleteCatalogue(cat.key)">✕</button>
+              </div>
+            }
+            @if (catalogues().length === 0) {
+              <div class="empty-instance">No catalogues yet.</div>
             }
           </div>
         }
-        @if (filteredSchemas().length === 0) {
-          <div class="empty-instance">No matching datasets found.</div>
+      </section>
+
+      <section class="catalog-section catalog-section-datasets">
+        <div class="catalog-section-header">
+          <h3>Dataset</h3>
+        </div>
+        @if (canCreateSchema()) {
+          <div class="catalogue-new-row">
+            <input
+              type="text"
+              placeholder="New dataset name…"
+              [ngModel]="newDatasetName()"
+              (ngModelChange)="newDatasetName.set($event)"
+              (keydown.enter)="createNewDataset()" />
+            <button type="button" class="mini" (click)="createNewDataset()" [disabled]="!newDatasetName().trim()">+ New</button>
+          </div>
         }
-      </div>
+        <div class="catalog-search-wrap">
+          <input
+            type="text"
+            class="catalog-search"
+            placeholder="Search datasets..."
+            [ngModel]="datasetSearch()"
+            (ngModelChange)="datasetSearch.set($event)" />
+          @if (datasetSearch()) {
+            <button type="button" class="catalog-search-clear" (click)="datasetSearch.set('')" title="Clear search">✕</button>
+          }
+        </div>
+        <div class="dataset-list">
+          @for (schema of filteredSchemas(); track schema.key) {
+            <div class="dataset-entry">
+              <button
+                type="button"
+                class="dataset-item"
+                [class.active]="selectedSchemaKey() === schema.key"
+                (click)="selectSchema(schema.key)">
+                <strong>{{ schema.name }}</strong>
+                <span>{{ schema.key }}</span>
+              </button>
+              @if (canManageSchema(schema)) {
+                <button
+                  type="button"
+                  class="danger icon-delete-btn catalog-delete-btn"
+                  aria-label="Delete dataset"
+                  title="Delete dataset"
+                  (click)="deleteDatasetSchema(schema.key, $event)">✕</button>
+              }
+            </div>
+          }
+          @if (filteredSchemas().length === 0) {
+            <div class="empty-instance">No matching datasets found.</div>
+          }
+        </div>
+      </section>
     </aside>
 
     <section class="panel editor">
+
+      @if (activePaneMode() === 'catalogue' && selectedCatalogue(); as cat) {
+          <div class="workspace-heading">
+            <h2>Catalogue Workspace - {{ cat.name }}</h2>
+          </div>
+
+          <div class="tab-row">
+            <button type="button" class="tab active-tab">Template</button>
+          </div>
+
+          <div class="schema-builder-panels">
+            <section class="schema-builder-panel">
+              <div class="schema-fields-header">
+                <h4>Header Fields Template</h4>
+                <button type="button" class="mini" (click)="addCatalogueTemplateField()">+ Add</button>
+              </div>
+              <p class="schema-template-notice">
+                These fields will be applied to all datasets in this catalogue. Datasets cannot define their own header fields while a template is active.
+              </p>
+              @for (field of catalogueTemplateDraft(); track trackByFieldIndex($index)) {
+                <div class="schema-field-card">
+                  <button
+                    type="button"
+                    class="danger icon-delete-btn schema-field-remove-btn"
+                    aria-label="Remove field"
+                    title="Remove field"
+                    (click)="removeCatalogueTemplateField($index)">✕</button>
+                  <div class="schema-field-grid schema-field-grid-header">
+                    <label class="schema-field-input">
+                      <span class="schema-field-label">Label</span>
+                      <input type="text" [id]="'cat-field-label-' + $index" [ngModel]="field.label" (ngModelChange)="updateCatalogueTemplateField($index, 'label', $event)" />
+                    </label>
+                    <label class="schema-field-input">
+                      <span class="schema-field-label">Name</span>
+                      <input type="text" [ngModel]="field.name" (ngModelChange)="updateCatalogueTemplateField($index, 'name', $event)" />
+                    </label>
+                    <label class="schema-field-input schema-type-input">
+                      <span class="schema-field-label">Type</span>
+                      <select [ngModel]="field.type" (ngModelChange)="updateCatalogueTemplateField($index, 'type', $event)">
+                        <option value="String">String</option>
+                        <option value="Number">Number</option>
+                        <option value="Date">Date</option>
+                        <option value="Boolean">Boolean</option>
+                        <option value="Select">Select</option>
+                        <option value="Lookup">Lookup</option>
+                      </select>
+                    </label>
+                    <label class="schema-field-input">
+                      <span class="schema-field-label">Default Value</span>
+                      @if (field.type === 'Boolean') {
+                        <select [ngModel]="getFieldDefaultValueText(field)" (ngModelChange)="updateCatalogueTemplateField($index, 'defaultValue', $event)">
+                          <option value="">No default</option>
+                          <option value="true">True</option>
+                          <option value="false">False</option>
+                        </select>
+                      } @else if (field.type === 'Number') {
+                        <input class="schema-mini-num" type="number" [ngModel]="getFieldDefaultValueText(field)" (ngModelChange)="updateCatalogueTemplateField($index, 'defaultValue', $event)" />
+                      } @else if (field.type === 'Date') {
+                        <input type="date" [ngModel]="getFieldDefaultValueText(field)" (ngModelChange)="updateCatalogueTemplateField($index, 'defaultValue', $event)" />
+                      } @else if (field.type === 'Select') {
+                        <select [ngModel]="getFieldDefaultValueText(field)" (ngModelChange)="updateCatalogueTemplateField($index, 'defaultValue', $event)">
+                          <option value="">No default</option>
+                          @for (allowedValue of field.allowedValues; track allowedValue) {
+                            <option [value]="allowedValue">{{ allowedValue }}</option>
+                          }
+                        </select>
+                      } @else {
+                        <input type="text" [ngModel]="getFieldDefaultValueText(field)" (ngModelChange)="updateCatalogueTemplateField($index, 'defaultValue', $event)" />
+                      }
+                    </label>
+                  </div>
+                  <div class="schema-field-limits-row">
+                    @if (field.type === 'Select') {
+                    <label class="schema-field-input schema-select-full schema-type-extra">
+                      <span class="schema-field-label">Allowed Values (csv)</span>
+                      <input class="schema-select-full" type="text" [ngModel]="getFieldAllowedValuesText(field)" (ngModelChange)="updateCatalogueTemplateField($index, 'allowedValues', $event)" />
+                    </label>
+                    }
+                    @if (field.type === 'Lookup') {
+                    <label class="schema-field-input schema-select-full schema-type-extra">
+                      <span class="schema-field-label">Lookup Dataset</span>
+                      <input class="schema-select-full" type="text" [ngModel]="field.lookupDatasetKey ?? ''" (ngModelChange)="updateCatalogueTemplateField($index, 'lookupDatasetKey', $event)" />
+                    </label>
+                    }
+                    <label class="schema-field-input">
+                      <span class="schema-field-label">Size</span>
+                      <input class="schema-mini-num" type="number" [ngModel]="field.maxLength ?? ''" (ngModelChange)="updateCatalogueTemplateField($index, 'maxLength', $event)" />
+                    </label>
+                    @if (field.type === 'Number') {
+                    <label class="schema-field-input">
+                      <span class="schema-field-label">Min</span>
+                      <input class="schema-mini-num" type="number" [ngModel]="field.minValue ?? ''" (ngModelChange)="updateCatalogueTemplateField($index, 'minValue', $event)" />
+                    </label>
+                    <label class="schema-field-input">
+                      <span class="schema-field-label">Max</span>
+                      <input class="schema-mini-num" type="number" [ngModel]="field.maxValue ?? ''" (ngModelChange)="updateCatalogueTemplateField($index, 'maxValue', $event)" />
+                    </label>
+                    }
+                    <label class="schema-check"><input type="checkbox" [ngModel]="field.isKey" (ngModelChange)="updateCatalogueTemplateField($index, 'isKey', $event)" /> Key</label>
+                    <label class="schema-check"><input type="checkbox" [ngModel]="field.required" (ngModelChange)="updateCatalogueTemplateField($index, 'required', $event)" /> Required</label>
+                  </div>
+                </div>
+              }
+              @if (catalogueTemplateDraft().length === 0) {
+                <p class="empty-instance">No fields defined — datasets in this catalogue will define their own header fields.</p>
+              }
+              <div class="schema-save-row">
+                <button type="button" (click)="saveCatalogueTemplate()">Save Template</button>
+              </div>
+            </section>
+          </div>
+      } @else {
+
       <div class="workspace-heading">
         <h2>Dataset Workspace<span *ngIf="selectedSchema() as schema"> - {{ schema.name }}</span></h2>
         @if (selectedSchema()) {
@@ -99,7 +280,7 @@
           @if (canEditSchema()) {
             <button type="button" class="tab" [class.active-tab]="activeTab() === 'schema'" (click)="openSchemaEditorTab()">Schema Editor</button>
           }
-          <button type="button" class="tab" [class.active-tab]="activeTab() === 'audit'" (click)="activateAuditTab()">Audit Trail</button>
+          <button type="button" class="tab" [class.active-tab]="activeTab() === 'audit'" (click)="activateAuditTab()">Audit</button>
         </div>
 
         @if (activeTab() === 'editor') {
@@ -212,8 +393,8 @@
                     <td>{{ instance.asOfDate }}</td>
                     <td>{{ instance.state }}</td>
                     <td>v{{ instance.version }}</td>
-                    <td>{{ instance.createdAtUtc ? (instance.createdAtUtc | date:'yyyy-MM-dd HH:mm:ss') : '-' }}</td>
-                    <td>{{ instance.lastModifiedAtUtc | date:'yyyy-MM-dd HH:mm:ss' }}</td>
+                    <td>{{ formatDateTimeLong(instance.createdAtUtc) }}</td>
+                    <td>{{ formatDateTimeLong(instance.lastModifiedAtUtc) }}</td>
                     <td>{{ instance.lastModifiedBy }}</td>
                     <td>
                       @for (entry of instance.header | keyvalue; track entry.key) {
@@ -250,12 +431,15 @@
           <div class="section-divider" aria-hidden="true"></div>
 
           <div class="section-heading-row">
-            <h3>
-              Header
-              @if (hasHeaderChanges()) {
-                <span class="unsaved-indicator" title="Unsaved header changes" aria-label="Unsaved header changes">*</span>
-              }
-            </h3>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+              <h3 style="margin: 0;">
+                Header
+                @if (hasHeaderChanges()) {
+                  <span class="unsaved-indicator" title="Unsaved header changes" aria-label="Unsaved header changes">*</span>
+                }
+              </h3>
+              <button type="button" (click)="activateInstanceAuditTab()" [disabled]="!selectedInstanceId()">Audit</button>
+            </div>
             <div class="toolbar section-actions">
               <button type="button" (click)="saveData()" [disabled]="!canWriteData() || !hasEditorChanges()">{{ saveActionLabel() }}</button>
               <button type="button" (click)="saveAsCopy()" [disabled]="!canWriteData() || !hasHeaderChanges()">Save Copy</button>
@@ -307,6 +491,7 @@
               [animateRows]="true"
               [stopEditingWhenCellsLoseFocus]="true"
               (gridReady)="onGridReady($event)"
+              (cellKeyDown)="onDetailGridCellKeyDown($event)"
               (cellValueChanged)="onGridCellValueChanged()">
             </ag-grid-angular>
           </div>
@@ -316,58 +501,78 @@
         } @else if (activeTab() === 'schema') {
           <div class="schema-editor-pane">
             <p>Build schema with controls or edit raw JSON. Both stay in sync.</p>
+          <style>
+            .schema-dataset-grid { gap: 1.5rem; align-items: stretch; }
+            .schema-dataset-main { display: flex; flex-direction: column; gap: 0.4rem; }
+            .schema-dataset-roles { display: flex; flex-direction: column; justify-content: space-between; }
+            .schema-dataset-roles h4 { margin: 0 0 0.25rem 0; font-size: 0.95em; }
+            .schema-editor-pane label { font-size: 0.8rem; margin-bottom: 0.1rem; color: var(--muted); }
+            .schema-editor-pane input[type="text"],
+            .schema-editor-pane select { padding: 0.25rem 0.4rem; min-height: 1.7rem; font-size: 0.85rem; }
+            .schema-editor-pane textarea { padding: 0.25rem 0.4rem; font-size: 0.85rem; min-height: 4rem; }
+            .schema-field-card { padding: 1.25rem 0.5rem 0.5rem; margin-bottom: 0.5rem; }
+            .schema-field-remove-btn { top: 0.2rem; right: 0.2rem; min-height: 1.2rem; padding: 0.1rem 0.3rem; }
+            .schema-field-limits-row { margin-top: 0.4rem; }
+            .schema-field-grid { gap: 0.5rem; }
+            .schema-template-notice { margin: 0.25rem 0 0.5rem; font-size: 0.85rem; }
+          </style>
             <div class="schema-layout" [class.json-collapsed]="schemaJsonPaneCollapsed()" *ngIf="schemaBuilderDraft() as draft">
               <div class="schema-main-stack">
               <section class="schema-builder-panel schema-dataset-panel">
                 <div class="schema-fields-header">
                   <h4>Dataset</h4>
-                  <button type="button" class="mini" (click)="saveSchemaEditor()" [disabled]="!canEditSchema() || !!schemaEditorJsonError()">Save</button>
+                  <button type="button" class="mini" (click)="saveSchemaEditor()" [disabled]="!canEditSchema() || !!schemaEditorJsonError() || draftMissingCatalogue()">Save</button>
                 </div>
                 <div class="schema-dataset-grid">
                   <div class="schema-dataset-main">
+                <div style="display: flex; gap: 0.75rem;">
+                  <div style="flex: 1; display: flex; flex-direction: column;">
                     <label>Key</label>
-                    <input
-                      type="text"
-                      [ngModel]="draft.key"
-                      (ngModelChange)="updateSchemaMeta('key', $event)" />
-
+                    <input type="text" [ngModel]="draft.key" (ngModelChange)="updateSchemaMeta('key', $event)" />
+                  </div>
+                  <div style="flex: 1; display: flex; flex-direction: column;">
                     <label>Name</label>
-                    <input
-                      type="text"
-                      [ngModel]="draft.name"
-                      (ngModelChange)="updateSchemaMeta('name', $event)" />
+                    <input type="text" [ngModel]="draft.name" (ngModelChange)="updateSchemaMeta('name', $event)" />
+                  </div>
+                </div>
 
-                    <label>Description</label>
-                    <textarea
-                      [ngModel]="draft.description"
-                      (ngModelChange)="updateSchemaMeta('description', $event)"></textarea>
+                <div style="display: flex; flex-direction: column;">
+                  <label>Catalogue <span class="field-required">*</span></label>
+                  <select [ngModel]="draft.catalogueKey ?? ''" (ngModelChange)="updateSchemaMeta('catalogueKey', $event)" [class.field-invalid]="draftMissingCatalogue()">
+                    <option value="">— Select a catalogue —</option>
+                    @for (cat of catalogues(); track cat.key) {
+                      <option [value]="cat.key">{{ cat.name }}</option>
+                    }
+                  </select>
+                  @if (draftMissingCatalogue()) {
+                    <span class="field-validation-hint" style="font-size: 0.8em; margin-top: 0.2rem;">A catalogue must be selected before saving.</span>
+                  }
+                </div>
+
+                <div style="display: flex; flex-direction: column; flex: 1;">
+                  <label>Description</label>
+                  <textarea style="flex: 1; resize: vertical;" [ngModel]="draft.description" (ngModelChange)="updateSchemaMeta('description', $event)"></textarea>
+                </div>
                   </div>
 
                   <div class="schema-dataset-roles">
-                    <h4>Roles (comma-separated roles or user IDs)</h4>
-                    <label>Read Roles</label>
-                    <input
-                      type="text"
-                      [ngModel]="getPermissionUsersText('readRoles')"
-                      (ngModelChange)="updatePermissionUsers('readRoles', $event)" />
-
-                    <label>Write Roles</label>
-                    <input
-                      type="text"
-                      [ngModel]="getPermissionUsersText('writeRoles')"
-                      (ngModelChange)="updatePermissionUsers('writeRoles', $event)" />
-
-                    <label>Signoff Roles</label>
-                    <input
-                      type="text"
-                      [ngModel]="getPermissionUsersText('signoffRoles')"
-                      (ngModelChange)="updatePermissionUsers('signoffRoles', $event)" />
-
-                    <label>Dataset Admin Roles</label>
-                    <input
-                      type="text"
-                      [ngModel]="getPermissionUsersText('datasetAdminRoles')"
-                      (ngModelChange)="updatePermissionUsers('datasetAdminRoles', $event)" />
+                <h4>Roles (comma-separated user IDs/roles)</h4>
+                <div style="display: flex; flex-direction: column;">
+                  <label>Read Roles</label>
+                  <input type="text" [ngModel]="getPermissionUsersText('readRoles')" (ngModelChange)="updatePermissionUsers('readRoles', $event)" />
+                </div>
+                <div style="display: flex; flex-direction: column;">
+                  <label>Write Roles</label>
+                  <input type="text" [ngModel]="getPermissionUsersText('writeRoles')" (ngModelChange)="updatePermissionUsers('writeRoles', $event)" />
+                </div>
+                <div style="display: flex; flex-direction: column;">
+                  <label>Signoff Roles</label>
+                  <input type="text" [ngModel]="getPermissionUsersText('signoffRoles')" (ngModelChange)="updatePermissionUsers('signoffRoles', $event)" />
+                </div>
+                <div style="display: flex; flex-direction: column;">
+                  <label>Dataset Admin Roles</label>
+                  <input type="text" [ngModel]="getPermissionUsersText('datasetAdminRoles')" (ngModelChange)="updatePermissionUsers('datasetAdminRoles', $event)" />
+                </div>
                   </div>
                 </div>
               </section>
@@ -375,68 +580,26 @@
               <section class="schema-builder-panel">
                 <div class="schema-fields-header">
                   <h4>Header Fields</h4>
-                  <button type="button" class="mini" (click)="addSchemaField('headerFields')" [disabled]="!canEditSchema()">+ Add</button>
                 </div>
-                @for (field of draft.headerFields; track trackByFieldIndex($index)) {
-                  <div class="schema-field-card">
-                    <button
-                      type="button"
-                      class="danger icon-delete-btn schema-field-remove-btn"
-                      aria-label="Remove header field"
-                      title="Remove header field"
-                      (click)="removeSchemaField('headerFields', $index)"
-                      [disabled]="!canEditSchema()">✕</button>
-                    <div class="schema-field-grid schema-field-grid-header">
-                      <label class="schema-field-input">
-                        <span class="schema-field-label">Name</span>
-                        <input type="text" [ngModel]="field.name" (ngModelChange)="updateSchemaField('headerFields', $index, 'name', $event)" />
-                      </label>
-                      <label class="schema-field-input">
-                        <span class="schema-field-label">Label</span>
-                        <input type="text" [ngModel]="field.label" (ngModelChange)="updateSchemaField('headerFields', $index, 'label', $event)" />
-                      </label>
-                    </div>
-                    <div class="schema-field-type-row">
-                      <label class="schema-field-input schema-type-input">
-                        <span class="schema-field-label">Type</span>
-                        <select [ngModel]="field.type" (ngModelChange)="updateSchemaField('headerFields', $index, 'type', $event)">
-                          <option value="String">String</option>
-                          <option value="Number">Number</option>
-                          <option value="Date">Date</option>
-                          <option value="Boolean">Boolean</option>
-                          <option value="Select">Select</option>
-                          <option value="Lookup">Lookup</option>
-                        </select>
-                      </label>
-                      @if (field.type === 'Select') {
-                      <label class="schema-field-input schema-select-full schema-type-extra">
-                        <span class="schema-field-label">Allowed Values (csv)</span>
-                        <input class="schema-select-full" type="text" [ngModel]="getFieldAllowedValuesText(field)" (ngModelChange)="updateSchemaField('headerFields', $index, 'allowedValues', $event)" />
-                      </label>
-                      }
-                      @if (field.type === 'Lookup') {
-                      <label class="schema-field-input schema-select-full schema-type-extra">
-                        <span class="schema-field-label">Lookup Dataset</span>
-                        <input class="schema-select-full" type="text" [ngModel]="field.lookupDatasetKey ?? ''" (ngModelChange)="updateSchemaField('headerFields', $index, 'lookupDatasetKey', $event)" />
-                      </label>
+                @if (draft.catalogueKey) {
+                  @if (draft.headerFields.length > 0) {
+                    <p class="schema-template-notice">Inherited from catalogue template — edit in the Catalogue Workspace.</p>
+                    <div class="schema-template-fields-readonly">
+                      @for (field of draft.headerFields; track field.name) {
+                        <div class="schema-template-field-row">
+                          <span class="schema-template-field-name">{{ field.name }}</span>
+                          <span class="schema-template-field-label">{{ field.label }}</span>
+                          <span class="schema-template-field-type">{{ field.type }}</span>
+                          @if (field.isKey) { <span class="schema-template-field-badge">Key</span> }
+                          @if (field.required) { <span class="schema-template-field-badge">Required</span> }
+                        </div>
                       }
                     </div>
-                    <div class="schema-field-limits-row">
-                      <label class="schema-field-input">
-                        <span class="schema-field-label">Size</span>
-                        <input class="schema-mini-num" type="number" [ngModel]="field.maxLength ?? ''" (ngModelChange)="updateSchemaField('headerFields', $index, 'maxLength', $event)" />
-                      </label>
-                      <label class="schema-field-input">
-                        <span class="schema-field-label">Min</span>
-                        <input class="schema-mini-num" type="number" [ngModel]="field.minValue ?? ''" (ngModelChange)="updateSchemaField('headerFields', $index, 'minValue', $event)" />
-                      </label>
-                      <label class="schema-field-input">
-                        <span class="schema-field-label">Max</span>
-                        <input class="schema-mini-num" type="number" [ngModel]="field.maxValue ?? ''" (ngModelChange)="updateSchemaField('headerFields', $index, 'maxValue', $event)" />
-                      </label>
-                      <label class="schema-check"><input type="checkbox" [ngModel]="field.required" (ngModelChange)="updateSchemaField('headerFields', $index, 'required', $event)" /> Required</label>
-                    </div>
-                  </div>
+                  } @else {
+                    <p class="schema-template-notice">The selected catalogue has no header template — all datasets share no fixed header structure.</p>
+                  }
+                } @else {
+                  <p class="schema-template-notice">Select a catalogue above to see its header field template.</p>
                 }
               </section>
 
@@ -456,15 +619,13 @@
                       [disabled]="!canEditSchema()">✕</button>
                     <div class="schema-field-grid schema-field-grid-header">
                       <label class="schema-field-input">
+                        <span class="schema-field-label">Label</span>
+                        <input type="text" [id]="'schema-detailFields-label-' + $index" [ngModel]="field.label" (ngModelChange)="updateSchemaField('detailFields', $index, 'label', $event)" />
+                      </label>
+                      <label class="schema-field-input">
                         <span class="schema-field-label">Name</span>
                         <input type="text" [ngModel]="field.name" (ngModelChange)="updateSchemaField('detailFields', $index, 'name', $event)" />
                       </label>
-                      <label class="schema-field-input">
-                        <span class="schema-field-label">Label</span>
-                        <input type="text" [ngModel]="field.label" (ngModelChange)="updateSchemaField('detailFields', $index, 'label', $event)" />
-                      </label>
-                    </div>
-                    <div class="schema-field-type-row">
                       <label class="schema-field-input schema-type-input">
                         <span class="schema-field-label">Type</span>
                         <select [ngModel]="field.type" (ngModelChange)="updateSchemaField('detailFields', $index, 'type', $event)">
@@ -476,6 +637,31 @@
                           <option value="Lookup">Lookup</option>
                         </select>
                       </label>
+                      <label class="schema-field-input">
+                        <span class="schema-field-label">Default Value</span>
+                        @if (field.type === 'Boolean') {
+                          <select [ngModel]="getFieldDefaultValueText(field)" (ngModelChange)="updateSchemaField('detailFields', $index, 'defaultValue', $event)">
+                            <option value="">No default</option>
+                            <option value="true">True</option>
+                            <option value="false">False</option>
+                          </select>
+                        } @else if (field.type === 'Number') {
+                          <input class="schema-mini-num" type="number" [ngModel]="getFieldDefaultValueText(field)" (ngModelChange)="updateSchemaField('detailFields', $index, 'defaultValue', $event)" />
+                        } @else if (field.type === 'Date') {
+                          <input type="date" [ngModel]="getFieldDefaultValueText(field)" (ngModelChange)="updateSchemaField('detailFields', $index, 'defaultValue', $event)" />
+                        } @else if (field.type === 'Select') {
+                          <select [ngModel]="getFieldDefaultValueText(field)" (ngModelChange)="updateSchemaField('detailFields', $index, 'defaultValue', $event)">
+                            <option value="">No default</option>
+                            @for (allowedValue of field.allowedValues; track allowedValue) {
+                              <option [value]="allowedValue">{{ allowedValue }}</option>
+                            }
+                          </select>
+                        } @else {
+                          <input type="text" [ngModel]="getFieldDefaultValueText(field)" (ngModelChange)="updateSchemaField('detailFields', $index, 'defaultValue', $event)" />
+                        }
+                      </label>
+                    </div>
+                    <div class="schema-field-limits-row">
                       @if (field.type === 'Select') {
                       <label class="schema-field-input schema-select-full schema-type-extra">
                         <span class="schema-field-label">Allowed Values (csv)</span>
@@ -488,12 +674,11 @@
                         <input class="schema-select-full" type="text" [ngModel]="field.lookupDatasetKey ?? ''" (ngModelChange)="updateSchemaField('detailFields', $index, 'lookupDatasetKey', $event)" />
                       </label>
                       }
-                    </div>
-                    <div class="schema-field-limits-row">
                       <label class="schema-field-input">
                         <span class="schema-field-label">Size</span>
                         <input class="schema-mini-num" type="number" [ngModel]="field.maxLength ?? ''" (ngModelChange)="updateSchemaField('detailFields', $index, 'maxLength', $event)" />
                       </label>
+                      @if (field.type === 'Number') {
                       <label class="schema-field-input">
                         <span class="schema-field-label">Min</span>
                         <input class="schema-mini-num" type="number" [ngModel]="field.minValue ?? ''" (ngModelChange)="updateSchemaField('detailFields', $index, 'minValue', $event)" />
@@ -502,6 +687,7 @@
                         <span class="schema-field-label">Max</span>
                         <input class="schema-mini-num" type="number" [ngModel]="field.maxValue ?? ''" (ngModelChange)="updateSchemaField('detailFields', $index, 'maxValue', $event)" />
                       </label>
+                      }
                       <label class="schema-check"><input type="checkbox" [ngModel]="field.required" (ngModelChange)="updateSchemaField('detailFields', $index, 'required', $event)" /> Required</label>
                       <label class="schema-check"><input type="checkbox" [ngModel]="field.isKey" (ngModelChange)="updateSchemaField('detailFields', $index, 'isKey', $event)" /> Key Field</label>
                     </div>
@@ -535,8 +721,41 @@
           </div>
         } @else {
           <div class="audit-tab-header">
-            <p>Review audited dataset and schema changes for the current user context.</p>
-            <button type="button" (click)="loadAudit()">Refresh</button>
+            @if (activeTab() === 'audit') {
+            <div class="saved-header-date-filters">
+              <label>
+                Helper Range
+                <select
+                  class="field-input"
+                  [ngModel]="auditDatePreset()"
+                  (ngModelChange)="applyAuditDatePreset($event, false)">
+                  @for (preset of savedHeaderDatePresets; track preset) {
+                    <option [value]="preset">{{ preset }}</option>
+                  }
+                </select>
+              </label>
+              <label>
+                Min Occurred Date
+                <input
+                  type="date"
+                  class="field-input"
+                  [ngModel]="auditOccurredDateMinDraft()"
+                  (ngModelChange)="auditOccurredDateMinDraft.set($event)" />
+              </label>
+              <label>
+                Max Occurred Date
+                <input
+                  type="date"
+                  class="field-input"
+                  [ngModel]="auditOccurredDateMaxDraft()"
+                  (ngModelChange)="auditOccurredDateMaxDraft.set($event)" />
+              </label>
+              @if (hasAuditFilters()) {
+                <button type="button" class="clear-filters-btn" (click)="clearAuditFilters()" title="Clear date range">✕ Clear</button>
+              }
+              <button type="button" class="saved-header-search-btn" (click)="runAuditSearch()">Search</button>
+            </div>
+            }
           </div>
           <div class="audit-layout">
             <div class="audit-tab-list">
@@ -547,9 +766,17 @@
                       type="button"
                       class="audit-event-btn"
                       [class.active]="selectedAuditEvent()?.id === event.id"
-                      (click)="selectAuditEvent(event.id)">
-                      <strong>{{ event.action }}</strong> | {{ event.datasetKey }} | {{ event.userId }}
-                      <div>{{ event.occurredAtUtc }}</div>
+                    (click)="selectAuditEvent(event.id)">
+                    <div class="audit-event-topline">
+                      <span class="pill" [ngStyle]="getEventActionStyle(event.action)">{{ event.action }}</span>
+                      <span class="audit-date-text">{{ formatDateTimeLong(event.occurredAtUtc) }}</span>
+                    </div>
+                    <div class="audit-event-secondline">
+                      <span class="pill audit-user-pill">👤 {{ event.userId }}</span>
+                      @for (entry of getAuditInstanceHeaderEntries(event); track entry.key) {
+                        <span class="header-chip">{{ entry.key }}: {{ entry.value }}</span>
+                      }
+                    </div>
                     </button>
                   </li>
                 }
@@ -558,26 +785,26 @@
 
             <div class="audit-details-panel">
               @if (selectedAuditEvent(); as selectedEvent) {
-                <div class="audit-details-meta">
-                  <strong>{{ selectedEvent.action }}</strong> | {{ selectedEvent.datasetKey }} | {{ selectedEvent.userId }}
-                  <div>{{ selectedEvent.occurredAtUtc }}</div>
+                <div class="audit-details-meta" style="display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap;">
+                  <span class="pill" [ngStyle]="getEventActionStyle(selectedEvent.action)">{{ selectedEvent.action }}</span>
+                  <span style="font-size: 1.1em;"><strong>{{ selectedEvent.datasetKey }}</strong></span>
                 </div>
                 @if (selectedAuditHasTabularDetails()) {
-                  @if (selectedAuditUpdatedRows().length > 0) {
+                  @if (selectedAuditDetailUpdatedRows().length > 0) {
                     <div class="audit-grid-wrap">
                       <table class="audit-change-table">
                         <thead>
                           <tr>
                             <th rowspan="2">Operation</th>
-                            @if (selectedAuditKeyColumns().length > 0) {
-                              <th [attr.colspan]="selectedAuditKeyColumns().length">Key Fields</th>
+                            @if (selectedAuditDetailUpdatedKeyColumns().length > 0) {
+                              <th [attr.colspan]="selectedAuditDetailUpdatedKeyColumns().length">Key Fields</th>
                             }
                             @for (valueColumn of selectedAuditUpdatedValueColumns(); track valueColumn) {
                               <th colspan="2">{{ valueColumn }}</th>
                             }
                           </tr>
                           <tr>
-                            @for (keyColumn of selectedAuditKeyColumns(); track keyColumn) {
+                            @for (keyColumn of selectedAuditDetailUpdatedKeyColumns(); track keyColumn) {
                               <th>{{ keyColumn }}</th>
                             }
                             @for (valueColumn of selectedAuditUpdatedValueColumns(); track valueColumn) {
@@ -587,13 +814,58 @@
                           </tr>
                         </thead>
                         <tbody>
-                          @for (row of selectedAuditUpdatedRows(); track row.rowKey + '-' + $index) {
+                          @for (row of selectedAuditDetailUpdatedRows(); track row.rowKey + '-' + $index) {
                             <tr>
-                              <td class="audit-cell-op audit-cell-op-updated">{{ getAuditOperationLabel(row) }}</td>
-                              @for (keyColumn of selectedAuditKeyColumns(); track keyColumn) {
+                              <td class="audit-cell-op audit-cell-op-updated">
+                                <span class="pill" [ngStyle]="getOperationStyle('updated')">{{ getAuditOperationLabel(row) }}</span>
+                              </td>
+                              @for (keyColumn of selectedAuditDetailUpdatedKeyColumns(); track keyColumn) {
                                 <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
                               }
                               @for (valueColumn of selectedAuditUpdatedValueColumns(); track valueColumn) {
+                                <td class="audit-cell-before">{{ getAuditBeforeCellValue(row, valueColumn) }}</td>
+                                <td class="audit-cell-after">{{ getAuditAfterCellValue(row, valueColumn) }}</td>
+                              }
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  }
+
+                  @if (selectedAuditHeaderChangedRows().length > 0) {
+                    <div class="audit-grid-wrap">
+                      <table class="audit-change-table">
+                        <thead>
+                          <tr>
+                            <th rowspan="2">Operation</th>
+                            @if (selectedAuditHeaderChangedKeyColumns().length > 0) {
+                              <th [attr.colspan]="selectedAuditHeaderChangedKeyColumns().length">Key Fields</th>
+                            }
+                            @for (valueColumn of selectedAuditHeaderChangedValueColumns(); track valueColumn) {
+                              <th colspan="2">{{ valueColumn }}</th>
+                            }
+                          </tr>
+                          <tr>
+                            @for (keyColumn of selectedAuditHeaderChangedKeyColumns(); track keyColumn) {
+                              <th>{{ keyColumn }}</th>
+                            }
+                            @for (valueColumn of selectedAuditHeaderChangedValueColumns(); track valueColumn) {
+                              <th>Before</th>
+                              <th>After</th>
+                            }
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (row of selectedAuditHeaderChangedRows(); track row.rowKey + '-' + $index) {
+                            <tr>
+                              <td class="audit-cell-op audit-cell-op-updated">
+                                <span class="pill" [ngStyle]="getOperationStyle('header-changed')">{{ getAuditOperationLabel(row) }}</span>
+                              </td>
+                              @for (keyColumn of selectedAuditHeaderChangedKeyColumns(); track keyColumn) {
+                                <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
+                              }
+                              @for (valueColumn of selectedAuditHeaderChangedValueColumns(); track valueColumn) {
                                 <td class="audit-cell-before">{{ getAuditBeforeCellValue(row, valueColumn) }}</td>
                                 <td class="audit-cell-after">{{ getAuditAfterCellValue(row, valueColumn) }}</td>
                               }
@@ -610,15 +882,15 @@
                         <thead>
                           <tr>
                             <th rowspan="2">Operation</th>
-                            @if (selectedAuditKeyColumns().length > 0) {
-                              <th [attr.colspan]="selectedAuditKeyColumns().length">Key Fields</th>
+                            @if (selectedAuditAddedKeyColumns().length > 0) {
+                              <th [attr.colspan]="selectedAuditAddedKeyColumns().length">Key Fields</th>
                             }
                             @for (valueColumn of selectedAuditAddedValueColumns(); track valueColumn) {
                               <th rowspan="2">{{ valueColumn }}</th>
                             }
                           </tr>
                           <tr>
-                            @for (keyColumn of selectedAuditKeyColumns(); track keyColumn) {
+                            @for (keyColumn of selectedAuditAddedKeyColumns(); track keyColumn) {
                               <th>{{ keyColumn }}</th>
                             }
                           </tr>
@@ -626,8 +898,10 @@
                         <tbody>
                           @for (row of selectedAuditAddedRows(); track row.rowKey + '-' + $index) {
                             <tr>
-                              <td class="audit-cell-op audit-cell-op-added">{{ getAuditOperationLabel(row) }}</td>
-                              @for (keyColumn of selectedAuditKeyColumns(); track keyColumn) {
+                              <td class="audit-cell-op audit-cell-op-added">
+                                <span class="pill" [ngStyle]="getOperationStyle('added')">{{ getAuditOperationLabel(row) }}</span>
+                              </td>
+                              @for (keyColumn of selectedAuditAddedKeyColumns(); track keyColumn) {
                                 <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
                               }
                               @for (valueColumn of selectedAuditAddedValueColumns(); track valueColumn) {
@@ -646,15 +920,15 @@
                         <thead>
                           <tr>
                             <th rowspan="2">Operation</th>
-                            @if (selectedAuditKeyColumns().length > 0) {
-                              <th [attr.colspan]="selectedAuditKeyColumns().length">Key Fields</th>
+                            @if (selectedAuditDeletedKeyColumns().length > 0) {
+                              <th [attr.colspan]="selectedAuditDeletedKeyColumns().length">Key Fields</th>
                             }
                             @for (valueColumn of selectedAuditDeletedValueColumns(); track valueColumn) {
                               <th rowspan="2">{{ valueColumn }}</th>
                             }
                           </tr>
                           <tr>
-                            @for (keyColumn of selectedAuditKeyColumns(); track keyColumn) {
+                            @for (keyColumn of selectedAuditDeletedKeyColumns(); track keyColumn) {
                               <th>{{ keyColumn }}</th>
                             }
                           </tr>
@@ -662,8 +936,10 @@
                         <tbody>
                           @for (row of selectedAuditDeletedRows(); track row.rowKey + '-' + $index) {
                             <tr>
-                              <td class="audit-cell-op audit-cell-op-removed">{{ getAuditOperationLabel(row) }}</td>
-                              @for (keyColumn of selectedAuditKeyColumns(); track keyColumn) {
+                              <td class="audit-cell-op audit-cell-op-removed">
+                                <span class="pill" [ngStyle]="getOperationStyle('deleted')">{{ getAuditOperationLabel(row) }}</span>
+                              </td>
+                              @for (keyColumn of selectedAuditDeletedKeyColumns(); track keyColumn) {
                                 <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
                               }
                               @for (valueColumn of selectedAuditDeletedValueColumns(); track valueColumn) {
@@ -687,6 +963,7 @@
         }
       } @else {
         <p>Select a dataset to start editing.</p>
+      }
       }
     </section>
   </main>
@@ -764,8 +1041,10 @@
                 <tbody>
                   @for (row of signoffAuditUpdatedRows(); track row.rowKey + '-' + $index) {
                     <tr>
-                      <td>{{ row.userId }}</td>
-                      <td class="audit-cell-op audit-cell-op-updated">{{ getAuditOperationLabel(row) }}</td>
+                      <td><span class="pill" style="background: var(--panel); border-color: var(--border); font-weight: normal;">👤 {{ row.userId }}</span></td>
+                      <td class="audit-cell-op audit-cell-op-updated">
+                        <span class="pill" [ngStyle]="getOperationStyle('updated')">{{ getAuditOperationLabel(row) }}</span>
+                      </td>
                       @for (keyColumn of signoffAuditKeyColumns(); track keyColumn) {
                         <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
                       }
@@ -803,8 +1082,10 @@
                 <tbody>
                   @for (row of signoffAuditAddedRows(); track row.rowKey + '-' + $index) {
                     <tr>
-                      <td>{{ row.userId }}</td>
-                      <td class="audit-cell-op audit-cell-op-added">{{ getAuditOperationLabel(row) }}</td>
+                      <td><span class="pill" style="background: var(--panel); border-color: var(--border); font-weight: normal;">👤 {{ row.userId }}</span></td>
+                      <td class="audit-cell-op audit-cell-op-added">
+                        <span class="pill" [ngStyle]="getOperationStyle('added')">{{ getAuditOperationLabel(row) }}</span>
+                      </td>
                       @for (keyColumn of signoffAuditKeyColumns(); track keyColumn) {
                         <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
                       }
@@ -841,8 +1122,10 @@
                 <tbody>
                   @for (row of signoffAuditDeletedRows(); track row.rowKey + '-' + $index) {
                     <tr>
-                      <td>{{ row.userId }}</td>
-                      <td class="audit-cell-op audit-cell-op-removed">{{ getAuditOperationLabel(row) }}</td>
+                      <td><span class="pill" style="background: var(--panel); border-color: var(--border); font-weight: normal;">👤 {{ row.userId }}</span></td>
+                      <td class="audit-cell-op audit-cell-op-removed">
+                        <span class="pill" [ngStyle]="getOperationStyle('deleted')">{{ getAuditOperationLabel(row) }}</span>
+                      </td>
                       @for (keyColumn of signoffAuditKeyColumns(); track keyColumn) {
                         <td>{{ getAuditKeyCellValue(row, keyColumn) }}</td>
                       }

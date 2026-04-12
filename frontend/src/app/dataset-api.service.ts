@@ -1,7 +1,7 @@
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { AuditEvent, DatasetHeaderSummary, DatasetHeadersQueryResponse, DatasetInstance, DatasetInstancesQueryResponse, DatasetLatestInstanceQueryResponse, DatasetSchema, DatasetState } from './models';
+import { AuditEvent, Catalogue, DatasetHeaderSummary, DatasetHeadersQueryResponse, DatasetInstance, DatasetInstancesQueryResponse, DatasetLatestInstanceQueryResponse, DatasetSchema, DatasetState } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class DatasetApiService {
@@ -256,7 +256,14 @@ export class DatasetApiService {
     });
   }
 
-  getAudit(userId: string, roles: string[], datasetKey?: string, instanceId?: string): Observable<AuditEvent[]> {
+  getAudit(
+    userId: string,
+    roles: string[],
+    datasetKey?: string,
+    instanceId?: string,
+    minOccurredDate?: string,
+    maxOccurredDate?: string
+  ): Observable<AuditEvent[]> {
     let params = new HttpParams();
     if (datasetKey && datasetKey.trim().length > 0) {
       params = params.set('datasetKey', datasetKey.trim());
@@ -264,10 +271,34 @@ export class DatasetApiService {
     if (instanceId && instanceId.trim().length > 0) {
       params = params.set('instanceId', instanceId.trim());
     }
+    if (minOccurredDate && minOccurredDate.trim().length > 0) {
+      params = params.set('minOccurredDate', minOccurredDate.trim());
+    }
+    if (maxOccurredDate && maxOccurredDate.trim().length > 0) {
+      params = params.set('maxOccurredDate', maxOccurredDate.trim());
+    }
 
     return this.http.get<AuditEvent[]>(`${this.baseUrl}/audit`, {
       headers: this.headers(userId, roles),
       params
+    });
+  }
+
+  getCatalogues(userId: string, roles: string[]): Observable<Catalogue[]> {
+    return this.http.get<Catalogue[]>(`${this.baseUrl}/catalogues`, {
+      headers: this.headers(userId, roles)
+    });
+  }
+
+  upsertCatalogue(userId: string, roles: string[], catalogue: Catalogue): Observable<Catalogue> {
+    return this.http.put<Catalogue>(`${this.baseUrl}/catalogues/${encodeURIComponent(catalogue.key)}`, catalogue, {
+      headers: this.headers(userId, roles)
+    });
+  }
+
+  deleteCatalogue(userId: string, roles: string[], catalogueKey: string): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/catalogues/${encodeURIComponent(catalogueKey)}`, {
+      headers: this.headers(userId, roles)
     });
   }
 

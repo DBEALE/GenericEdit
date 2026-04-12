@@ -27,6 +27,16 @@ public static class DatasetAuthorizer
     public const string DatasetAdminRole = "DatasetAdmin";
 
     /// <summary>
+    /// Role that grants permission to create, update, and delete catalogues.
+    /// <see cref="DatasetAdminRole"/> transitively grants the same rights.
+    /// </summary>
+    public const string CatalogueAdminRole = "CatalogueAdmin";
+
+    /// <summary>Returns <c>true</c> if the user may create, update, or delete catalogues.</summary>
+    public static bool CanManageCatalogues(UserContext user)
+        => user.HasRole(DatasetAdminRole) || user.HasRole(CatalogueAdminRole);
+
+    /// <summary>
     /// Returns <c>true</c> if the user's ID or any of their roles appears in <paramref name="principals"/>.
     /// This allows permissions to be granted to both individual users and to groups/roles.
     /// </summary>

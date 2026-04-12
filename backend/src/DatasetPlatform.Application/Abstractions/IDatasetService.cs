@@ -123,6 +123,22 @@ public interface IDatasetService
     /// </summary>
     Task<DatasetInstance> SignoffInstanceAsync(SignoffDatasetRequest request, UserContext user, CancellationToken cancellationToken);
 
+    // ─── Catalogue management ────────────────────────────────────────────────────
+
+    /// <summary>Returns all catalogues. Catalogue names are not sensitive — no per-user filtering applied.</summary>
+    Task<IReadOnlyList<Catalogue>> GetCataloguesAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Creates or replaces a catalogue. Requires <c>CatalogueAdmin</c> or <c>DatasetAdmin</c> role.
+    /// </summary>
+    Task<Catalogue> UpsertCatalogueAsync(Catalogue catalogue, UserContext user, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Deletes a catalogue. Schemas that reference it are not affected — their <c>CatalogueKey</c>
+    /// becomes orphaned and the schema is treated as uncatalogued. Requires <c>CatalogueAdmin</c> or <c>DatasetAdmin</c> role.
+    /// </summary>
+    Task DeleteCatalogueAsync(string catalogueKey, UserContext user, CancellationToken cancellationToken);
+
     // ─── Audit & lookups ─────────────────────────────────────────────────────────
 
     /// <summary>
@@ -130,7 +146,13 @@ public interface IDatasetService
     /// DatasetAdmin users can request all events or filter by dataset key.
     /// Non-admin users must specify a dataset key and must have read access to that dataset.
     /// </summary>
-    Task<IReadOnlyList<AuditEvent>> GetAuditAsync(UserContext user, CancellationToken cancellationToken, string? datasetKey = null, Guid? instanceId = null);
+    Task<IReadOnlyList<AuditEvent>> GetAuditAsync(
+        UserContext user,
+        CancellationToken cancellationToken,
+        string? datasetKey = null,
+        Guid? instanceId = null,
+        DateOnly? minOccurredDate = null,
+        DateOnly? maxOccurredDate = null);
 
     /// <summary>
     /// Returns the set of permissible values for a Lookup field that references <paramref name="lookupDatasetKey"/>.

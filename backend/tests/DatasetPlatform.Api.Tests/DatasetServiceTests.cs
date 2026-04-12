@@ -255,6 +255,73 @@ public sealed class DatasetServiceTests
     }
 
     [Fact]
+    public async Task CreateInstance_ShouldPersistHeaderSnapshotIntoAudit()
+    {
+        var repository = new InMemoryRepository();
+        var service = new DatasetService(repository, new LookupValueCache());
+        var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
+
+        await service.UpsertSchemaAsync(CreateSchema("FX_RATES", read: ["viewer"], write: ["writer"], signoff: ["approver"]), admin, CancellationToken.None);
+
+        var writer = CreateUser("writer", "writer");
+        await service.CreateInstanceAsync(new CreateDatasetInstanceRequest
+        {
+            DatasetKey = "FX_RATES",
+            AsOfDate = new DateOnly(2026, 4, 3),
+            State = "Draft",
+            Header = new Dictionary<string, object?> { ["book"] = "LON" },
+            Rows = [new Dictionary<string, object?> { ["currency"] = "USD", ["rate"] = "1.24" }]
+        }, writer, CancellationToken.None);
+
+        var viewer = CreateUser("viewer-user", "viewer");
+        var audit = await service.GetAuditAsync(viewer, CancellationToken.None, "FX_RATES");
+        var createEvent = Assert.Single(audit, x => x.Action == "INSTANCE_CREATE");
+
+        Assert.Equal("LON", createEvent.InstanceHeader["book"]);
+    }
+
+    [Fact]
+    public async Task GetAudit_ShouldApplyOccurredDateRangeFilter()
+    {
+        var repository = new InMemoryRepository();
+        var service = new DatasetService(repository, new LookupValueCache());
+        var admin = CreateUser("admin", DatasetAuthorizer.DatasetAdminRole);
+
+        await service.UpsertSchemaAsync(CreateSchema("FX_RATES", read: ["viewer"]), admin, CancellationToken.None);
+
+        await repository.AddAuditEventAsync(new AuditEvent
+        {
+            Id = Guid.NewGuid(),
+            OccurredAtUtc = new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero),
+            UserId = "writer",
+            Action = "INSTANCE_CREATE",
+            DatasetKey = "FX_RATES"
+        }, CancellationToken.None);
+
+        await repository.AddAuditEventAsync(new AuditEvent
+        {
+            Id = Guid.NewGuid(),
+            OccurredAtUtc = new DateTimeOffset(2026, 4, 10, 12, 0, 0, TimeSpan.Zero),
+            UserId = "writer",
+            Action = "INSTANCE_UPDATE",
+            DatasetKey = "FX_RATES"
+        }, CancellationToken.None);
+
+        var viewer = CreateUser("viewer-user", "viewer");
+        var audit = await service.GetAuditAsync(
+            viewer,
+            CancellationToken.None,
+            "FX_RATES",
+            null,
+            new DateOnly(2026, 4, 1),
+            new DateOnly(2026, 4, 30));
+
+        var updateEvent = Assert.Single(audit, x => x.Action == "INSTANCE_UPDATE");
+        Assert.NotNull(updateEvent);
+        Assert.DoesNotContain(audit, x => x.Action == "INSTANCE_CREATE");
+    }
+
+    [Fact]
     public async Task DatasetScopedAdminRole_ShouldAllowSchemaUpdateForThatDatasetOnly()
     {
         var repository = new InMemoryRepository();
@@ -441,14 +508,26 @@ public sealed class DatasetServiceTests
         var audit = await service.GetAuditAsync(admin, CancellationToken.None);
         var updateEvent = audit.Last(x => x.Action == "INSTANCE_UPDATE");
 
-        Assert.Equal(2, updateEvent.RowChanges.Count);
-        var updatedUsd = updateEvent.RowChanges.Single(x => x.Operation == "updated" && x.KeyFields["currency"] == "USD");
-        var removedEur = updateEvent.RowChanges.Single(x => x.Operation == "removed" && x.KeyFields["currency"] == "EUR");
+        Assert.Equal(3, updateEvent.RowChanges.Count);
+        var updatedUsd = updateEvent.RowChanges.Single(x =>
+            x.Operation == "updated"
+            && x.KeyFields.TryGetValue("currency", out var updatedCurrency)
+            && string.Equals(updatedCurrency, "USD", StringComparison.OrdinalIgnoreCase));
+        var removedEur = updateEvent.RowChanges.Single(x =>
+            x.Operation == "removed"
+            && x.KeyFields.TryGetValue("currency", out var removedCurrency)
+            && string.Equals(removedCurrency, "EUR", StringComparison.OrdinalIgnoreCase));
+        var updatedHeader = updateEvent.RowChanges.Single(x =>
+            x.Operation == "updated"
+            && x.KeyFields.TryGetValue("Header Field", out var headerField)
+            && string.Equals(headerField, "book", StringComparison.OrdinalIgnoreCase));
 
         Assert.Equal("1.24", updatedUsd.SourceValues!["rate"]);
         Assert.Equal("1.31", updatedUsd.TargetValues!["rate"]);
         Assert.Equal("1.11", removedEur.SourceValues!["rate"]);
         Assert.Null(removedEur.TargetValues);
+        Assert.Equal("LON", updatedHeader.SourceValues!["Value"]);
+        Assert.Equal("NYC", updatedHeader.TargetValues!["Value"]);
     }
 
     [Fact]
@@ -514,7 +593,11 @@ public sealed class DatasetServiceTests
         var updateEvent = audit.Last(x => x.Action == "INSTANCE_UPDATE");
 
         Assert.Empty(createEvent.RowChanges);
-        Assert.Empty(updateEvent.RowChanges);
+        var updatedHeader = Assert.Single(updateEvent.RowChanges);
+        Assert.Equal("updated", updatedHeader.Operation);
+        Assert.Equal("book", updatedHeader.KeyFields["Header Field"]);
+        Assert.Equal("LON", updatedHeader.SourceValues!["Value"]);
+        Assert.Equal("NYC", updatedHeader.TargetValues!["Value"]);
     }
 
     [Fact]
@@ -548,7 +631,11 @@ public sealed class DatasetServiceTests
         var audit = await service.GetAuditAsync(admin, CancellationToken.None);
         var updateEvent = audit.Last(x => x.Action == "INSTANCE_UPDATE");
 
-        Assert.Empty(updateEvent.RowChanges);
+        var stateChange = Assert.Single(updateEvent.RowChanges);
+        Assert.Equal("updated", stateChange.Operation);
+        Assert.Equal("State", stateChange.KeyFields["Header Field"]);
+        Assert.Equal("Draft", stateChange.SourceValues!["Value"]);
+        Assert.Equal("Scenario Testing", stateChange.TargetValues!["Value"]);
     }
 
     [Fact]
@@ -1034,8 +1121,28 @@ public sealed class DatasetServiceTests
     private sealed class InMemoryRepository : IDataRepository
     {
         private readonly List<DatasetSchema> _schemas = [];
+        private readonly List<Catalogue> _catalogues = [];
         private readonly List<DatasetInstance> _instances = [];
         private readonly List<AuditEvent> _audit = [];
+
+        public Task<IReadOnlyList<Catalogue>> GetCataloguesAsync(CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<Catalogue>>(_catalogues.ToList());
+
+        public Task<Catalogue?> GetCatalogueAsync(string catalogueKey, CancellationToken cancellationToken)
+            => Task.FromResult(_catalogues.FirstOrDefault(x => string.Equals(x.Key, catalogueKey, StringComparison.OrdinalIgnoreCase)));
+
+        public Task UpsertCatalogueAsync(Catalogue catalogue, CancellationToken cancellationToken)
+        {
+            _catalogues.RemoveAll(x => string.Equals(x.Key, catalogue.Key, StringComparison.OrdinalIgnoreCase));
+            _catalogues.Add(catalogue);
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteCatalogueAsync(string catalogueKey, CancellationToken cancellationToken)
+        {
+            _catalogues.RemoveAll(x => string.Equals(x.Key, catalogueKey, StringComparison.OrdinalIgnoreCase));
+            return Task.CompletedTask;
+        }
 
         public Task<IReadOnlyList<DatasetSchema>> GetSchemasAsync(CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<DatasetSchema>>(_schemas.ToList());
@@ -1162,11 +1269,25 @@ public sealed class DatasetServiceTests
             return Task.FromResult(removed > 0);
         }
 
-        public Task<IReadOnlyList<AuditEvent>> GetAuditEventsAsync(string? datasetKey, CancellationToken cancellationToken)
+        public Task<IReadOnlyList<AuditEvent>> GetAuditEventsAsync(
+            string? datasetKey,
+            CancellationToken cancellationToken,
+            DateOnly? minOccurredDate = null,
+            DateOnly? maxOccurredDate = null)
         {
             var filtered = string.IsNullOrWhiteSpace(datasetKey)
                 ? _audit
                 : _audit.Where(x => string.Equals(x.DatasetKey, datasetKey, StringComparison.OrdinalIgnoreCase)).ToList();
+
+            if (minOccurredDate.HasValue)
+            {
+                filtered = filtered.Where(x => DateOnly.FromDateTime(x.OccurredAtUtc.UtcDateTime) >= minOccurredDate.Value).ToList();
+            }
+
+            if (maxOccurredDate.HasValue)
+            {
+                filtered = filtered.Where(x => DateOnly.FromDateTime(x.OccurredAtUtc.UtcDateTime) <= maxOccurredDate.Value).ToList();
+            }
 
             return Task.FromResult<IReadOnlyList<AuditEvent>>(filtered.ToList());
         }

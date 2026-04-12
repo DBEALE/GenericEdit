@@ -2,9 +2,9 @@ import { CommonModule } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AgGridAngular } from 'ag-grid-angular';
-import { CellClassParams, ColDef, GetRowIdParams, GridApi, GridReadyEvent, ICellEditorComp, ICellEditorParams, ICellRendererParams, ValueParserParams, ValueSetterParams } from 'ag-grid-community';
+import { CellClassParams, CellKeyDownEvent, ColDef, FullWidthCellKeyDownEvent, GetRowIdParams, GridApi, GridReadyEvent, ICellEditorComp, ICellEditorParams, ICellRendererParams, ValueParserParams, ValueSetterParams } from 'ag-grid-community';
 import { DatasetApiService } from './dataset-api.service';
-import { AuditEvent, AuditRowChange, DatasetHeaderSummary, DatasetHeadersQueryResponse, DatasetInstance, DatasetInternalInfo, DatasetLatestInstanceQueryResponse, DatasetSchema, DatasetState, SchemaField } from './models';
+import { AuditEvent, AuditRowChange, Catalogue, DatasetHeaderSummary, DatasetHeadersQueryResponse, DatasetInstance, DatasetInternalInfo, DatasetLatestInstanceQueryResponse, DatasetSchema, DatasetState, SchemaField } from './models';
 import { QueryPageComponent } from './query-page/query-page';
 
 type DetailGridRow = Record<string, unknown> & { __rowKey: string };
@@ -174,18 +174,31 @@ export class App {
   ];
 
   readonly schemas = signal<DatasetSchema[]>([]);
+  readonly catalogues = signal<Catalogue[]>([]);
+  readonly selectedCatalogueKey = signal<string | null>(null);
+  readonly activePaneMode = signal<'dataset' | 'catalogue'>('dataset');
+  readonly catalogueConfigMode = signal(false);
+  readonly newCatalogueName = signal('');
+  readonly catalogueTemplateDraft = signal<SchemaField[]>([]);
+  readonly catalogueActiveTab = signal<'template'>('template');
+  readonly newDatasetName = signal('');
   readonly datasetSearch = signal('');
   readonly selectedSchemaKey = signal<string>('');
   readonly selectedSchema = computed(() => this.schemas().find((x) => x.key === this.selectedSchemaKey()) ?? null);
   readonly filteredSchemas = computed(() => {
+    const catalogueKey = this.selectedCatalogueKey();
     const search = this.datasetSearch().trim().toLowerCase();
-    const matchingSchemas = search.length === 0
+    let schemas = catalogueKey === null
       ? [...this.schemas()]
-      : this.schemas().filter((schema) =>
-          schema.name.toLowerCase().includes(search) ||
-          schema.key.toLowerCase().includes(search));
+      : this.schemas().filter((s) => s.catalogueKey === catalogueKey);
 
-    return matchingSchemas.sort((left, right) =>
+    if (search.length > 0) {
+      schemas = schemas.filter((schema) =>
+        schema.name.toLowerCase().includes(search) ||
+        schema.key.toLowerCase().includes(search));
+    }
+
+    return schemas.sort((left, right) =>
       left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
   });
 
@@ -227,11 +240,17 @@ export class App {
     return events.find((event) => event.id === selectedId) ?? events[0];
   });
   readonly selectedAuditDetailRows = computed(() => this.parseAuditDetailGridRows(this.selectedAuditEvent()));
-  readonly selectedAuditKeyColumns = computed(() => this.collectAuditColumns(this.selectedAuditDetailRows(), 'keyValues'));
   readonly selectedAuditUpdatedRows = computed(() => this.selectedAuditDetailRows().filter((row) => this.getAuditOperationType(row) === 'updated'));
+  readonly selectedAuditHeaderChangedRows = computed(() => this.selectedAuditUpdatedRows().filter((row) => this.isHeaderChangeRow(row)));
+  readonly selectedAuditDetailUpdatedRows = computed(() => this.selectedAuditUpdatedRows().filter((row) => !this.isHeaderChangeRow(row)));
   readonly selectedAuditAddedRows = computed(() => this.selectedAuditDetailRows().filter((row) => this.getAuditOperationType(row) === 'added'));
   readonly selectedAuditDeletedRows = computed(() => this.selectedAuditDetailRows().filter((row) => this.getAuditOperationType(row) === 'deleted'));
-  readonly selectedAuditUpdatedValueColumns = computed(() => this.collectAuditValueColumns(this.selectedAuditUpdatedRows()));
+  readonly selectedAuditDetailUpdatedKeyColumns = computed(() => this.collectAuditColumns(this.selectedAuditDetailUpdatedRows(), 'keyValues'));
+  readonly selectedAuditHeaderChangedKeyColumns = computed(() => this.collectAuditColumns(this.selectedAuditHeaderChangedRows(), 'keyValues'));
+  readonly selectedAuditAddedKeyColumns = computed(() => this.collectAuditColumns(this.selectedAuditAddedRows(), 'keyValues'));
+  readonly selectedAuditDeletedKeyColumns = computed(() => this.collectAuditColumns(this.selectedAuditDeletedRows(), 'keyValues'));
+  readonly selectedAuditUpdatedValueColumns = computed(() => this.collectAuditValueColumns(this.selectedAuditDetailUpdatedRows()));
+  readonly selectedAuditHeaderChangedValueColumns = computed(() => this.collectAuditValueColumns(this.selectedAuditHeaderChangedRows()));
   readonly selectedAuditAddedValueColumns = computed(() => this.collectAuditValueColumns(this.selectedAuditAddedRows()));
   readonly selectedAuditDeletedValueColumns = computed(() => this.collectAuditValueColumns(this.selectedAuditDeletedRows()));
   readonly selectedAuditHasTabularDetails = computed(() => this.selectedAuditDetailRows().length > 0);
@@ -248,6 +267,11 @@ export class App {
   readonly instanceFilterAsOfDateMaxDraft = signal('');
   readonly instanceFilterAsOfDateMin = signal('');
   readonly instanceFilterAsOfDateMax = signal('');
+  readonly auditDatePreset = signal<SavedHeaderDatePreset>('Last month');
+  readonly auditOccurredDateMinDraft = signal('');
+  readonly auditOccurredDateMaxDraft = signal('');
+  readonly auditOccurredDateMin = signal('');
+  readonly auditOccurredDateMax = signal('');
   readonly sortedInstances = computed(() => {
     const col = this.instanceSortCol();
     const dir = this.instanceSortDir();
@@ -281,7 +305,10 @@ export class App {
     this.instanceFilterAsOfDateMax().trim().length > 0 ||
     this.instanceFilterState().trim().length > 0 ||
     this.instanceFilterHeader().trim().length > 0);
-  readonly activeTab = signal<'editor' | 'schema' | 'audit'>('editor');
+  readonly hasAuditFilters = computed(() =>
+    this.auditOccurredDateMin().trim().length > 0 ||
+    this.auditOccurredDateMax().trim().length > 0);
+  readonly activeTab = signal<'editor' | 'schema' | 'audit' | 'instance-audit'>('editor');
   readonly userSimulationCollapsed = signal(true);
   readonly isEditorFormVisible = signal(false);
 
@@ -324,6 +351,13 @@ export class App {
   private pendingSignoffRequest: { datasetKey: string; instanceId: string } | null = null;
 
   readonly canCreateSchema = computed(() => this.hasRole('DatasetAdmin'));
+  readonly canManageCatalogues = computed(() => this.hasRole('DatasetAdmin'));
+  readonly selectedCatalogue = computed(() =>
+    this.catalogues().find((c) => c.key === this.selectedCatalogueKey()) ?? null
+  );
+  readonly draftMissingCatalogue = computed(() =>
+    this.catalogues().length > 0 && !this.schemaBuilderDraft()?.catalogueKey
+  );
   readonly canEditSchema = computed(() => {
     if (this.hasRole('DatasetAdmin')) {
       return true;
@@ -568,6 +602,8 @@ export class App {
     const savedTheme = this.readSavedTheme();
     this.theme.set(savedTheme);
     this.applySavedHeaderDatePreset('Last month', true);
+    this.applyAuditDatePreset('Last month', false);
+    this.loadCatalogues();
     this.loadSchemas();
   }
 
@@ -594,6 +630,23 @@ export class App {
     this.loadDatasetInstances(true);
   }
 
+  applyAuditDatePreset(preset: SavedHeaderDatePreset, autoSearch = true): void {
+    this.auditDatePreset.set(preset);
+    const { minAsOfDate, maxAsOfDate } = this.getSavedHeaderPresetRange(preset);
+    this.auditOccurredDateMinDraft.set(minAsOfDate);
+    this.auditOccurredDateMaxDraft.set(maxAsOfDate);
+
+    if (autoSearch) {
+      this.runAuditSearch();
+    }
+  }
+
+  runAuditSearch(): void {
+    this.auditOccurredDateMin.set(this.auditOccurredDateMinDraft().trim());
+    this.auditOccurredDateMax.set(this.auditOccurredDateMaxDraft().trim());
+    this.loadAudit();
+  }
+
   toggleUserSimulation(): void {
     this.userSimulationCollapsed.update((value) => !value);
   }
@@ -601,6 +654,7 @@ export class App {
   applyUserSimulationPreset(preset: UserSimulationPreset): void {
     this.userId.set(preset.userId);
     this.roleInput.set(preset.roles.join(','));
+    this.loadCatalogues();
     this.loadSchemas();
   }
 
@@ -640,42 +694,177 @@ export class App {
     });
   }
 
-  createNewDataset(): void {
-    if (!this.canCreateSchema()) {
-      this.setError({ error: 'DatasetAdmin role is required to create datasets.' });
-      return;
-    }
+  loadCatalogues(): void {
+    this.api.getCatalogues(this.userId(), this.roles()).subscribe({
+      next: (catalogues) => this.catalogues.set(catalogues),
+      error: (err) => this.setError(err)
+    });
+  }
 
-    const keyInput = globalThis.prompt('New dataset key (e.g. FX_NEW):', 'NEW_DATASET');
-    if (!keyInput) {
-      return;
+  selectCatalogue(catalogueKey: string | null): void {
+    this.selectedCatalogueKey.set(catalogueKey);
+    if (this.catalogueConfigMode() && this.canManageCatalogues()) {
+      if (catalogueKey !== null) {
+        const cat = this.catalogues().find((c) => c.key === catalogueKey);
+        this.catalogueTemplateDraft.set(cat ? [...cat.headerFields] : []);
+        this.activePaneMode.set('catalogue');
+      } else {
+        this.activePaneMode.set('dataset');
+      }
     }
+  }
 
-    const key = keyInput.trim().toUpperCase();
-    if (!/^[A-Z0-9_]+$/.test(key)) {
-      this.setError({ error: 'Dataset key must use only A-Z, 0-9, and underscore.' });
-      return;
+  toggleCatalogueConfigMode(): void {
+    const next = !this.catalogueConfigMode();
+    this.catalogueConfigMode.set(next);
+    if (!next) {
+      this.activePaneMode.set('dataset');
+      this.catalogueTemplateDraft.set([]);
     }
+  }
 
-    const defaultName = this.toPascalCaseFromKey(key);
-    const nameInput = globalThis.prompt('New dataset name:', defaultName);
-    if (!nameInput) {
-      return;
-    }
-
-    const schema = this.buildNewSchemaTemplate(key, nameInput.trim());
-    this.clearError();
-    this.setStatus(`Creating schema ${key}...`);
-    this.api.upsertSchema(this.userId(), this.roles(), schema).subscribe({
+  addCatalogue(): void {
+    const name = this.newCatalogueName().trim();
+    if (!name) return;
+    const key = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const catalogue: Catalogue = { key, name, description: '', headerFields: [] };
+    this.api.upsertCatalogue(this.userId(), this.roles(), catalogue).subscribe({
       next: (saved) => {
-        this.setStatus(`Schema ${saved.key} created`);
-        this.setSaveNotice(`Dataset created: ${saved.key}`);
-        this.loadSchemas();
-        this.selectSchema(saved.key);
-        this.openSchemaEditorTab();
+        this.catalogues.update((list) => [...list.filter((c) => c.key !== saved.key), saved]
+          .sort((a, b) => a.key.localeCompare(b.key)));
+        this.newCatalogueName.set('');
+        this.selectedCatalogueKey.set(saved.key);
+        this.catalogueTemplateDraft.set([]);
+        this.activePaneMode.set('catalogue');
       },
       error: (err) => this.setError(err)
     });
+  }
+
+  deleteCatalogue(catalogueKey: string): void {
+    this.api.deleteCatalogue(this.userId(), this.roles(), catalogueKey).subscribe({
+      next: () => {
+        this.catalogues.update((list) => list.filter((c) => c.key !== catalogueKey));
+        if (this.selectedCatalogueKey() === catalogueKey) {
+          this.selectedCatalogueKey.set(null);
+          this.activePaneMode.set('dataset');
+          this.catalogueTemplateDraft.set([]);
+        }
+      },
+      error: (err) => this.setError(err)
+    });
+  }
+
+  addCatalogueTemplateField(): void {
+    const draft = this.catalogueTemplateDraft();
+    const nextIndex = draft.length + 1;
+    const name = `Header${nextIndex}`;
+    this.catalogueTemplateDraft.set([...draft, {
+      name,
+      label: name,
+      type: 'String',
+      isKey: false,
+      required: true,
+      maxLength: 64,
+      allowedValues: []
+    }]);
+
+    this.focusAndSelectInput(`cat-field-label-${draft.length}`);
+  }
+
+  removeCatalogueTemplateField(index: number): void {
+    this.catalogueTemplateDraft.update((fields) => fields.filter((_, i) => i !== index));
+  }
+
+  updateCatalogueTemplateField(index: number, fieldKey: keyof SchemaField, value: unknown): void {
+    this.catalogueTemplateDraft.update((fields) => {
+      const updated = [...fields];
+      const field = { ...updated[index] };
+      if (fieldKey === 'maxLength' || fieldKey === 'minValue' || fieldKey === 'maxValue') {
+        const n = Number(value);
+        (field as Record<string, unknown>)[fieldKey] = isNaN(n) || value === '' ? undefined : n;
+      } else if (fieldKey === 'defaultValue') {
+        const raw = value?.toString() ?? '';
+        field.defaultValue = raw.trim().length > 0 ? raw : undefined;
+      } else if (fieldKey === 'allowedValues') {
+        field.allowedValues = typeof value === 'string'
+          ? value.split(',').map((v) => v.trim()).filter((v) => v.length > 0)
+          : [];
+      } else {
+        if (fieldKey === 'label') {
+          const oldLabel = field.label || '';
+          const oldDerived = oldLabel.replace(/\s+/g, '').toUpperCase();
+          const newLabel = value?.toString() ?? '';
+          if (!field.name || field.name === oldDerived || field.name === oldLabel) {
+            field.name = newLabel.replace(/\s+/g, '').toUpperCase();
+          }
+        }
+        (field as Record<string, unknown>)[fieldKey] = value;
+      }
+      if (fieldKey === 'type') {
+        field.allowedValues = value === 'Select' ? field.allowedValues : [];
+        if (value !== 'Lookup') field.lookupDatasetKey = undefined;
+      }
+      updated[index] = field as SchemaField;
+      return updated;
+    });
+  }
+
+  saveCatalogueTemplate(): void {
+    const key = this.selectedCatalogueKey();
+    if (!key) return;
+    const cat = this.catalogues().find((c) => c.key === key);
+    if (!cat) return;
+    const updated: Catalogue = { ...cat, headerFields: this.catalogueTemplateDraft() };
+    this.api.upsertCatalogue(this.userId(), this.roles(), updated).subscribe({
+      next: (saved) => {
+        this.catalogues.update((list) =>
+          list.map((c) => c.key === saved.key ? saved : c));
+      },
+      error: (err) => this.setError(err)
+    });
+  }
+
+  createNewDataset(): void {
+    const name = this.newDatasetName().trim();
+    if (!name) return;
+
+    if (!this.confirmDiscardPendingChanges()) {
+      return;
+    }
+
+    const key = name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+    if (!/^[A-Z0-9_]+$/.test(key)) {
+      this.setError({ error: 'Dataset name produces an invalid key. Use letters, numbers, or spaces only.' });
+      return;
+    }
+
+    if (this.schemas().some((schema) => schema.key === key)) {
+      this.setError({ error: `Schema ${key} already exists.` });
+      return;
+    }
+
+    const schema = this.buildNewSchemaTemplate(key, name);
+    this.clearError();
+    this.newDatasetName.set('');
+    this.schemas.update((schemas) =>
+      [schema, ...schemas].sort((left, right) =>
+        left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })));
+    this.selectedSchemaKey.set(schema.key);
+    this.activePaneMode.set('dataset');
+    this.setSchemaBuilderFromSchema(schema);
+    this.asOfDate.set(this.todayDate());
+    this.state.set('Draft');
+    this.headerDraft.set(this.emptyValues(schema.headerFields));
+    this.setDetailRows([this.emptyValues(schema.detailFields)]);
+    this.currentInstance.set(null);
+    this.selectedInstanceId.set('');
+    this.isEditorFormVisible.set(false);
+    this.activeTab.set('schema');
+    this.showValidation.set(false);
+    this.lookupPermissibleValues.set({});
+    this.setStatus(`Schema ${schema.key} draft ready`);
+    this.setSaveNotice(`Draft created: ${schema.key}. Click Save to persist.`);
   }
 
   openSchemaEditorTab(): void {
@@ -722,6 +911,7 @@ export class App {
     }
 
     this.selectedSchemaKey.set(datasetKey);
+    this.activePaneMode.set('dataset');
     const schema = this.selectedSchema();
     if (!schema) {
       return;
@@ -885,6 +1075,7 @@ export class App {
         this.headerDraft.set({ ...fullInstance.header });
         this.setDetailRows(fullInstance.rows.map((row) => ({ ...row })));
         this.isEditorFormVisible.set(true);
+        this.activeTab.set('editor');
         this.setStatus(`Loaded instance ${fullInstance.id} (v${fullInstance.version})`);
         this.showValidation.set(false);
       },
@@ -910,6 +1101,7 @@ export class App {
     this.headerDraft.set(this.emptyValues(schema.headerFields));
     this.setDetailRows([this.emptyValues(schema.detailFields)]);
     this.isEditorFormVisible.set(true);
+    this.activeTab.set('editor');
     this.showValidation.set(false);
     this.refreshHeaderGridRows();
     this.refreshGridRows();
@@ -939,6 +1131,7 @@ export class App {
           this.headerDraft.set(this.emptyValues(schema.headerFields));
           this.setDetailRows([this.emptyValues(schema.detailFields)]);
           this.isEditorFormVisible.set(false);
+          this.activeTab.set('editor');
         }
 
         this.setStatus('Header deleted');
@@ -967,6 +1160,9 @@ export class App {
         this.headerDraft.set((instance?.header ?? this.emptyValues(schema.headerFields)) as Record<string, unknown>);
         this.setDetailRows((instance?.rows?.length ? instance.rows : [this.emptyValues(schema.detailFields)]) as Record<string, unknown>[]);
         this.isEditorFormVisible.set(!!instance);
+        if (instance) {
+          this.activeTab.set('editor');
+        }
         this.setInternalInfoStatus(internalInfo);
         this.showValidation.set(false);
         this.setStatus(instance ? `Loaded version ${instance.version}` : 'No data found for selected key/date/state');
@@ -1016,6 +1212,8 @@ export class App {
       api.applyTransaction({ add: [newRow] });
       api.ensureIndexVisible(nextRows.length - 1, 'bottom');
     }
+
+    this.focusAndSelectNewDetailRowCell(nextRows.length - 1);
 
     this.refreshGridRows();
     this.setStatus(`Added row ${nextRows.length}`);
@@ -1550,7 +1748,7 @@ export class App {
 
     const contributors = Array.from(new Set(items.map((x) => x.userId.trim()).filter((x) => x.length > 0)));
     const baselineText = lastSignoff
-      ? `Last signoff: ${new Date(lastSignoff.occurredAtUtc).toLocaleString()}`
+      ? `Last signoff: ${this.formatDateTimeLong(lastSignoff.occurredAtUtc)}`
       : 'No prior signoff found for this instance.';
 
     if (items.length === 0) {
@@ -1675,15 +1873,27 @@ export class App {
     }
   }
 
-  updateSchemaMeta(field: 'key' | 'name' | 'description', value: string): void {
+  updateSchemaMeta(field: 'key' | 'name' | 'description' | 'catalogueKey', value: string): void {
     const current = this.ensureSchemaBuilderDraft();
     if (!current) {
       return;
     }
 
-    const nextValue = field === 'key' ? value.trim().toUpperCase() : value;
-    this.schemaBuilderDraft.set({ ...current, [field]: nextValue });
+    const nextValue = field === 'key' ? value.trim().toUpperCase()
+      : field === 'catalogueKey' ? (value.trim().toLowerCase() || undefined)
+      : value;
+
+    const updated = { ...current, [field]: nextValue };
+
+    if (field === 'catalogueKey') {
+      const catKey = nextValue as string | undefined;
+      const cat = catKey ? this.catalogues().find((c) => c.key === catKey) : null;
+      updated.headerFields = cat?.headerFields.length ? [...cat.headerFields] : [];
+    }
+
+    this.schemaBuilderDraft.set(updated);
     this.syncSchemaJsonFromBuilder();
+
   }
 
   getPermissionUsersText(kind: keyof DatasetSchema['permissions']): string {
@@ -1741,6 +1951,7 @@ export class App {
       [section]: [...current[section], newField]
     });
     this.syncSchemaJsonFromBuilder();
+    this.focusAndSelectInput(`schema-${section}-label-${current[section].length}`);
   }
 
   removeSchemaField(section: 'headerFields' | 'detailFields', index: number): void {
@@ -1777,6 +1988,9 @@ export class App {
       updated.required = value === true || value === 'true';
     } else if (field === 'isKey') {
       updated.isKey = value === true || value === 'true';
+    } else if (field === 'defaultValue') {
+      const raw = value?.toString() ?? '';
+      updated.defaultValue = raw.trim().length > 0 ? raw : undefined;
     } else if (field === 'allowedValues') {
       updated.allowedValues = (value?.toString() ?? '')
         .split(',')
@@ -1785,6 +1999,13 @@ export class App {
     } else if (field === 'lookupDatasetKey') {
       const lookupDatasetKey = value?.toString().trim().toUpperCase() ?? '';
       updated.lookupDatasetKey = lookupDatasetKey.length > 0 ? lookupDatasetKey : undefined;
+    } else if (field === 'label') {
+      const oldLabel = existing.label || '';
+      const oldDerived = oldLabel.replace(/\s+/g, '').toUpperCase();
+      updated.label = value?.toString() ?? '';
+      if (!existing.name || existing.name === oldDerived || existing.name === oldLabel) {
+        updated.name = updated.label.replace(/\s+/g, '').toUpperCase();
+      }
     } else if (field === 'type') {
       updated.type = (value?.toString() ?? 'String') as SchemaField['type'];
       if (updated.type !== 'Select') {
@@ -1820,18 +2041,87 @@ export class App {
     return field.allowedValues.join(', ');
   }
 
+  getFieldDefaultValueText(field: SchemaField): string {
+    return field.defaultValue ?? '';
+  }
+
   trackByFieldIndex(index: number): number {
     return index;
   }
 
+  private focusAndSelectInput(inputId: string): void {
+    setTimeout(() => {
+      const element = document.getElementById(inputId);
+      if (!(element instanceof HTMLInputElement)) {
+        return;
+      }
+
+      element.focus();
+      element.select();
+    }, 0);
+  }
+
+  private focusAndSelectNewDetailRowCell(rowIndex: number): void {
+    const firstFieldName = this.selectedSchema()?.detailFields[0]?.name;
+    if (!firstFieldName) {
+      return;
+    }
+
+    setTimeout(() => {
+      const api = this.getActiveDetailGridApi();
+      if (!api) {
+        return;
+      }
+
+      api.ensureIndexVisible(rowIndex, 'bottom');
+      api.setFocusedCell(rowIndex, firstFieldName);
+      api.startEditingCell({ rowIndex, colKey: firstFieldName });
+
+      setTimeout(() => {
+        const editorInput = document.querySelector(
+          '.ag-cell-inline-editing input, .ag-popup-editor input, .ag-cell-inline-editing textarea, .ag-popup-editor textarea'
+        );
+
+        if (!(editorInput instanceof HTMLInputElement || editorInput instanceof HTMLTextAreaElement)) {
+          return;
+        }
+
+        this.focusAndSelectEditorContent(editorInput);
+      }, 0);
+    }, 0);
+  }
+
+  private focusAndSelectEditorContent(editorInput: HTMLInputElement | HTMLTextAreaElement): void {
+    editorInput.focus();
+
+    const valueLength = editorInput.value?.length ?? 0;
+    if (typeof editorInput.setSelectionRange === 'function') {
+      try {
+        editorInput.setSelectionRange(0, valueLength);
+      } catch {
+        // Some input types do not support explicit selection ranges.
+      }
+    }
+
+    if (typeof editorInput.select === 'function') {
+      editorInput.select();
+    }
+  }
+
   loadAudit(): void {
     this.clearError();
-    this.setStatus('Loading audit records...');
-    this.api.getAudit(this.userId(), this.roles(), this.selectedSchemaKey()).subscribe({
+
+    const isInstanceAudit = this.activeTab() === 'instance-audit';
+    const instanceId = isInstanceAudit ? this.selectedInstanceId() : undefined;
+    const minOccurredDate = isInstanceAudit ? undefined : (this.auditOccurredDateMin().trim() || undefined);
+    const maxOccurredDate = isInstanceAudit ? undefined : (this.auditOccurredDateMax().trim() || undefined);
+
+    this.setStatus(isInstanceAudit ? 'Loading instance audit records...' : 'Loading audit records...');
+    this.api.getAudit(this.userId(), this.roles(), this.selectedSchemaKey(), instanceId, minOccurredDate, maxOccurredDate).subscribe({
       next: (audit) => {
         this.auditEvents.set(audit);
         this.selectedAuditEventId.set(audit[0]?.id ?? '');
-        this.setStatus(`Loaded ${audit.length} audit events for ${this.selectedSchemaKey()}`);
+        this.setStatus(`Loaded ${audit.length} audit events for ${isInstanceAudit ? 'this instance' : this.selectedSchemaKey()}`);
       },
       error: (err) => this.setError(err)
     });
@@ -1843,6 +2133,14 @@ export class App {
 
   activateAuditTab(): void {
     this.activeTab.set('audit');
+    this.runAuditSearch();
+  }
+
+  activateInstanceAuditTab(): void {
+    if (!this.selectedInstanceId()) {
+      return;
+    }
+    this.activeTab.set('instance-audit');
     this.loadAudit();
   }
 
@@ -1902,8 +2200,54 @@ export class App {
     this.rowDrafts.set(this.toPlainRows(nextRows));
   }
 
+  onDetailGridCellKeyDown(event: CellKeyDownEvent<Record<string, unknown>> | FullWidthCellKeyDownEvent<Record<string, unknown>>): void {
+    const keyboardEvent = event.event as KeyboardEvent | undefined;
+    if (!keyboardEvent || !this.shouldAddRowFromKeyboardEvent(event, keyboardEvent)) {
+      return;
+    }
+
+    keyboardEvent.preventDefault();
+    keyboardEvent.stopPropagation();
+
+    this.gridApi()?.stopEditing();
+
+    setTimeout(() => {
+      this.addRow();
+    }, 0);
+  }
+
   getDetailRowId(params: GetRowIdParams<Record<string, unknown>>): string {
     return params.data['__rowKey']?.toString() ?? '';
+  }
+
+  private shouldAddRowFromKeyboardEvent(
+    event: CellKeyDownEvent<Record<string, unknown>> | FullWidthCellKeyDownEvent<Record<string, unknown>>,
+    keyboardEvent: KeyboardEvent): boolean {
+    if (!this.canWriteData()) {
+      return false;
+    }
+
+    if (keyboardEvent.key !== 'Enter' && !(keyboardEvent.key === 'Tab' && !keyboardEvent.shiftKey)) {
+      return false;
+    }
+
+    const schema = this.selectedSchema();
+    if (!schema || schema.detailFields.length === 0) {
+      return false;
+    }
+
+    const lastFieldName = schema.detailFields[schema.detailFields.length - 1]?.name;
+    const fieldName = 'colDef' in event ? event.colDef.field : undefined;
+    if (!lastFieldName || fieldName !== lastFieldName) {
+      return false;
+    }
+
+    const rowIndex = event.node?.rowIndex;
+    if (rowIndex === null || rowIndex === undefined) {
+      return false;
+    }
+
+    return rowIndex === this.detailGridRows().length - 1;
   }
 
   getHeaderInputType(field: SchemaField): string {
@@ -1947,11 +2291,23 @@ export class App {
   }
 
   private emptyValues(fields: SchemaField[]): Record<string, unknown> {
-    return Object.fromEntries(fields.map((field) => [field.name, field.type === 'Boolean' ? false : '']));
+    return Object.fromEntries(fields.map((field) => {
+      const hasDefaultValue = field.defaultValue !== undefined && field.defaultValue !== null;
+      const value = hasDefaultValue
+        ? this.normalizeFieldValue(field, field.defaultValue)
+        : (field.type === 'Boolean' ? false : '');
+      return [field.name, value];
+    }));
   }
 
   private setSchemaBuilderFromSchema(schema: DatasetSchema): void {
     const normalized = this.normalizeSchema(schema);
+    if (normalized.catalogueKey) {
+      const cat = this.catalogues().find((c) => c.key === normalized.catalogueKey);
+      if (cat?.headerFields.length) {
+        normalized.headerFields = [...cat.headerFields];
+      }
+    }
     this.schemaBuilderDraft.set(normalized);
     this.schemaEditorJsonError.set('');
     this.schemaJsonSyncInProgress = true;
@@ -1989,10 +2345,12 @@ export class App {
   private normalizeSchema(value: unknown): DatasetSchema {
     const input = (value ?? {}) as Partial<DatasetSchema>;
     const permissions = (input.permissions ?? {}) as Record<string, unknown>;
+    const catalogueKey = input.catalogueKey?.toString().trim().toLowerCase() || undefined;
     return {
       key: input.key?.toString().trim().toUpperCase() ?? '',
       name: input.name?.toString() ?? '',
       description: input.description?.toString() ?? '',
+      ...(catalogueKey ? { catalogueKey } : {}),
       headerFields: this.normalizeSchemaFields(input.headerFields),
       detailFields: this.normalizeSchemaFields(input.detailFields),
       permissions: {
@@ -2020,6 +2378,7 @@ export class App {
         type: normalizedType,
         isKey: field.isKey === true,
         required: field.required === true,
+        defaultValue: field.defaultValue?.toString() ?? undefined,
         maxLength: typeof field.maxLength === 'number' ? field.maxLength : undefined,
         minValue: typeof field.minValue === 'number' ? field.minValue : undefined,
         maxValue: typeof field.maxValue === 'number' ? field.maxValue : undefined,
@@ -2448,6 +2807,14 @@ export class App {
     this.loadDatasetInstances();
   }
 
+  clearAuditFilters(): void {
+    this.auditOccurredDateMinDraft.set('');
+    this.auditOccurredDateMaxDraft.set('');
+    this.auditOccurredDateMin.set('');
+    this.auditOccurredDateMax.set('');
+    this.loadAudit();
+  }
+
   private getSavedHeaderPresetRange(preset: SavedHeaderDatePreset): { minAsOfDate: string; maxAsOfDate: string } {
     const end = new Date();
     end.setHours(0, 0, 0, 0);
@@ -2514,17 +2881,7 @@ export class App {
       key,
       name,
       description: 'New dataset schema',
-      headerFields: [
-        {
-          name: 'headerId',
-          label: 'Header Id',
-          type: 'String',
-          isKey: false,
-          required: true,
-          maxLength: 64,
-          allowedValues: []
-        }
-      ],
+      headerFields: [],
       detailFields: [
         {
           name: 'value',
@@ -2706,6 +3063,10 @@ export class App {
   }
 
   getAuditOperationLabel(row: AuditDetailGridRow): string {
+    if (this.isHeaderChangeRow(row)) {
+      return 'Header Changed';
+    }
+
     const operationType = this.getAuditOperationType(row);
     if (operationType === 'deleted') {
       return 'Deleted';
@@ -2720,6 +3081,70 @@ export class App {
     }
 
     return 'Updated';
+  }
+
+  private isHeaderChangeRow(row: AuditDetailGridRow): boolean {
+    return this.hasAuditField(row.keyValues, 'Header Field');
+  }
+
+  getAuditInstanceSummary(event: AuditEvent, maxItems = 3): string {
+    const entries = this.getAuditInstanceHeaderEntries(event);
+    if (entries.length === 0) {
+      return '';
+    }
+
+    const visibleEntries = entries.slice(0, maxItems);
+    const summary = visibleEntries.map((entry) => `${entry.key}: ${entry.value}`).join(' | ');
+    const remainingCount = entries.length - visibleEntries.length;
+    return remainingCount > 0 ? `${summary} | +${remainingCount} more` : summary;
+  }
+
+  getAuditInstanceHeaderEntries(event: AuditEvent): Array<{ key: string; value: string }> {
+    const header = this.resolveAuditInstanceHeader(event);
+    if (!header) {
+      return [];
+    }
+
+    const labelsByKey = new Map((this.selectedSchema()?.headerFields ?? []).map((field) => [field.name, field.label || field.name]));
+    const getPriority = (key: string): number => {
+      const normalized = key.trim().toLowerCase();
+      if (normalized === 'as of date') {
+        return 0;
+      }
+      if (normalized === 'state') {
+        return 1;
+      }
+      return 2;
+    };
+    const headerKeys = Object.keys(header).sort((left, right) => {
+      const priorityDiff = getPriority(left) - getPriority(right);
+      if (priorityDiff !== 0) {
+        return priorityDiff;
+      }
+
+      const headerFields = this.selectedSchema()?.headerFields ?? [];
+      const leftIndex = headerFields.findIndex((field) => field.name === left || field.label === left);
+      const rightIndex = headerFields.findIndex((field) => field.name === right || field.label === right);
+
+      if (leftIndex >= 0 && rightIndex >= 0) {
+        return leftIndex - rightIndex;
+      }
+
+      if (leftIndex >= 0) {
+        return -1;
+      }
+
+      if (rightIndex >= 0) {
+        return 1;
+      }
+
+      return left.localeCompare(right, undefined, { sensitivity: 'base' });
+    });
+
+    return headerKeys.map((key) => ({
+      key: labelsByKey.get(key) ?? key,
+      value: header[key]
+    }));
   }
 
   getAuditOperationValue(
@@ -2749,6 +3174,47 @@ export class App {
     return '';
   }
 
+  formatDateTimeLong(value: string | Date | null | undefined): string {
+    if (!value) {
+      return '-';
+    }
+
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return '-';
+    }
+
+    const day = date.getDate();
+    const ordinal = this.getOrdinalSuffix(day);
+    const month = date.toLocaleString('en-GB', { month: 'long' });
+    const year = date.getFullYear();
+    const hours = `${date.getHours()}`.padStart(2, '0');
+    const minutes = `${date.getMinutes()}`.padStart(2, '0');
+    const seconds = `${date.getSeconds()}`.padStart(2, '0');
+
+    return `${day}${ordinal} ${month} ${year} ${hours}:${minutes}:${seconds}`;
+  }
+
+  private getOrdinalSuffix(day: number): string {
+    const mod100 = day % 100;
+    if (mod100 >= 11 && mod100 <= 13) {
+      return 'th';
+    }
+
+    const mod10 = day % 10;
+    if (mod10 === 1) {
+      return 'st';
+    }
+    if (mod10 === 2) {
+      return 'nd';
+    }
+    if (mod10 === 3) {
+      return 'rd';
+    }
+
+    return 'th';
+  }
+
   private hasAuditField(values: Record<string, string>, key: string): boolean {
     return Object.prototype.hasOwnProperty.call(values, key);
   }
@@ -2764,6 +3230,34 @@ export class App {
     }
 
     return normalized;
+  }
+
+  private resolveAuditInstanceHeader(event: AuditEvent | null): Record<string, string> | null {
+    if (!event) {
+      return null;
+    }
+
+    const matchingInstance = event.datasetInstanceId
+      ? this.datasetInstances().find((instance) => instance.id === event.datasetInstanceId)
+      : null;
+
+    const headerSource = event.instanceHeader && Object.keys(event.instanceHeader).length > 0
+      ? event.instanceHeader
+      : matchingInstance?.header;
+
+    const normalizedHeader = this.normalizeAuditValueMap(headerSource);
+    const asOfDate = event.asOfDate ?? matchingInstance?.asOfDate;
+    const state = event.state ?? matchingInstance?.state;
+
+    if (asOfDate) {
+      normalizedHeader['As Of Date'] = asOfDate;
+    }
+
+    if (state) {
+      normalizedHeader['State'] = state;
+    }
+
+    return Object.keys(normalizedHeader).length > 0 ? normalizedHeader : null;
   }
 
   private formatAuditValues(values: Record<string, unknown>): string {
@@ -2868,5 +3362,35 @@ export class App {
     } catch {
       // Ignore storage errors in restricted browser contexts.
     }
+  }
+
+  getEventActionStyle(action: string): Record<string, string> {
+    const upper = (action || '').toUpperCase();
+    if (upper.includes('CREATE')) {
+      return { backgroundColor: 'color-mix(in oklab, var(--success) 15%, var(--panel))', color: 'var(--success)', borderColor: 'color-mix(in oklab, var(--success) 40%, transparent)' };
+    }
+    if (upper.includes('UPDATE')) {
+      return { backgroundColor: 'color-mix(in oklab, var(--warning) 15%, var(--panel))', color: 'var(--warning)', borderColor: 'color-mix(in oklab, var(--warning) 40%, transparent)' };
+    }
+    if (upper.includes('DELETE') || upper.includes('REMOVE')) {
+      return { backgroundColor: 'color-mix(in oklab, var(--danger) 15%, var(--panel))', color: 'var(--danger)', borderColor: 'color-mix(in oklab, var(--danger) 40%, transparent)' };
+    }
+    if (upper.includes('SIGNOFF')) {
+      return { backgroundColor: 'color-mix(in oklab, var(--accent) 15%, var(--panel))', color: 'var(--accent)', borderColor: 'color-mix(in oklab, var(--accent) 40%, transparent)' };
+    }
+    return { backgroundColor: 'var(--panel-soft)', color: 'var(--ink)', borderColor: 'var(--border)' };
+  }
+
+  getOperationStyle(operationType: 'added' | 'updated' | 'deleted' | 'header-changed'): Record<string, string> {
+    if (operationType === 'added') {
+      return { backgroundColor: 'color-mix(in oklab, var(--success) 15%, var(--panel))', color: 'var(--success)', borderColor: 'color-mix(in oklab, var(--success) 40%, transparent)' };
+    }
+    if (operationType === 'deleted') {
+      return { backgroundColor: 'color-mix(in oklab, var(--danger) 15%, var(--panel))', color: 'var(--danger)', borderColor: 'color-mix(in oklab, var(--danger) 40%, transparent)' };
+    }
+    if (operationType === 'header-changed') {
+      return { backgroundColor: 'color-mix(in oklab, var(--accent) 15%, var(--panel))', color: 'var(--accent)', borderColor: 'color-mix(in oklab, var(--accent) 40%, transparent)' };
+    }
+    return { backgroundColor: 'color-mix(in oklab, var(--warning) 15%, var(--panel))', color: 'var(--warning)', borderColor: 'color-mix(in oklab, var(--warning) 40%, transparent)' };
   }
 }

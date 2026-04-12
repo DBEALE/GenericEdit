@@ -29,6 +29,12 @@ public sealed class DatasetSchema
     public string Description { get; init; } = string.Empty;
 
     /// <summary>
+    /// Optional key of the catalogue this schema belongs to.
+    /// <c>null</c> means the schema is not assigned to any catalogue.
+    /// </summary>
+    public string? CatalogueKey { get; init; }
+
+    /// <summary>
     /// Fields that appear in the instance header (summary / identity section).
     /// Header fields are stored in every index file and are used for filtering without
     /// loading the full detail payload. At least one field marked <see cref="SchemaField.IsKey"/>

@@ -34,6 +34,24 @@ public sealed class AuditEvent
     public Guid? DatasetInstanceId { get; init; }
 
     /// <summary>
+    /// Instance as-of date at the moment the audit event was recorded.
+    /// Populated for instance-level actions.
+    /// </summary>
+    public string? AsOfDate { get; init; }
+
+    /// <summary>
+    /// Instance state at the moment the audit event was recorded.
+    /// Populated for instance-level actions.
+    /// </summary>
+    public string? State { get; init; }
+
+    /// <summary>
+    /// Snapshot of header field values for the affected instance at the time of the audit event.
+    /// Populated for instance-level create/update/delete/signoff actions when header data is available.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> InstanceHeader { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Structured row-level change records for instance create/update actions.
     /// <para>
     /// Each entry includes key fields and optional source/target value maps.

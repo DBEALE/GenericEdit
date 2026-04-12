@@ -114,7 +114,22 @@ public sealed class LookupControllerTests
         public Task<DatasetInstance> SignoffInstanceAsync(SignoffDatasetRequest request, UserContext user, CancellationToken cancellationToken)
             => throw new NotImplementedException();
 
-        public Task<IReadOnlyList<AuditEvent>> GetAuditAsync(UserContext user, CancellationToken cancellationToken, string? datasetKey = null)
+        public Task<IReadOnlyList<Catalogue>> GetCataloguesAsync(CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<Catalogue> UpsertCatalogueAsync(Catalogue catalogue, UserContext user, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task DeleteCatalogueAsync(string catalogueKey, UserContext user, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<IReadOnlyList<AuditEvent>> GetAuditAsync(
+            UserContext user,
+            CancellationToken cancellationToken,
+            string? datasetKey = null,
+            Guid? instanceId = null,
+            DateOnly? minOccurredDate = null,
+            DateOnly? maxOccurredDate = null)
             => throw new NotImplementedException();
     }
 }

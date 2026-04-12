@@ -19,7 +19,41 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
     public async Task<IReadOnlyList<DatasetSchema>> GetAccessibleSchemasAsync(UserContext user, CancellationToken cancellationToken)
     {
         var schemas = await repository.GetSchemasAsync(cancellationToken);
-        return schemas.Where(schema => DatasetAuthorizer.CanRead(schema, user)).ToList();
+        var accessible = schemas.Where(schema => DatasetAuthorizer.CanRead(schema, user)).ToList();
+        return await EnrichSchemasWithCatalogueTemplatesAsync(accessible, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<DatasetSchema>> EnrichSchemasWithCatalogueTemplatesAsync(
+        IReadOnlyList<DatasetSchema> schemas, CancellationToken cancellationToken)
+    {
+        var hasCatalogued = schemas.Any(s => s.CatalogueKey is not null);
+        if (!hasCatalogued)
+            return schemas;
+
+        var catalogues = await repository.GetCataloguesAsync(cancellationToken);
+        var templateLookup = catalogues
+            .Where(c => c.HeaderFields.Count > 0)
+            .ToDictionary(c => c.Key, c => c.HeaderFields);
+
+        if (templateLookup.Count == 0)
+            return schemas;
+
+        return schemas.Select(schema =>
+            schema.CatalogueKey is not null && templateLookup.TryGetValue(schema.CatalogueKey, out var fields)
+                ? new DatasetSchema
+                  {
+                      Key = schema.Key,
+                      Name = schema.Name,
+                      Description = schema.Description,
+                      CatalogueKey = schema.CatalogueKey,
+                      HeaderFields = fields,
+                      DetailFields = schema.DetailFields,
+                      Permissions = schema.Permissions,
+                      CreatedAtUtc = schema.CreatedAtUtc,
+                      UpdatedAtUtc = schema.UpdatedAtUtc
+                  }
+                : schema
+        ).ToList();
     }
 
     public async Task<DatasetSchema> UpsertSchemaAsync(DatasetSchema schema, UserContext user, CancellationToken cancellationToken)
@@ -49,12 +83,19 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
         EnsureKeyFieldsAreValid(schema);
         EnsureFieldConfigurationsAreValid(schema);
 
+        var normalizedCatalogueKey = string.IsNullOrWhiteSpace(schema.CatalogueKey) ? null : schema.CatalogueKey.Trim().ToLowerInvariant();
+        var catalogue = normalizedCatalogueKey is not null
+            ? await repository.GetCatalogueAsync(normalizedCatalogueKey, cancellationToken)
+            : null;
+        var hasTemplate = catalogue is not null && catalogue.HeaderFields.Count > 0;
+
         var normalizedSchema = new DatasetSchema
         {
             Key = normalizedKey,
             Name = schema.Name,
             Description = schema.Description,
-            HeaderFields = schema.HeaderFields,
+            CatalogueKey = normalizedCatalogueKey,
+            HeaderFields = hasTemplate ? [] : schema.HeaderFields,
             DetailFields = schema.DetailFields,
             Permissions = schema.Permissions,
             CreatedAtUtc = schema.CreatedAtUtc,
@@ -63,7 +104,22 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
 
         await repository.UpsertSchemaAsync(normalizedSchema, cancellationToken);
         await AddAuditAsync(user, "SCHEMA_UPSERT", normalizedSchema.Key, null, cancellationToken);
-        return normalizedSchema;
+
+        // Return with template fields injected so the caller sees the effective schema
+        return hasTemplate
+            ? new DatasetSchema
+              {
+                  Key = normalizedSchema.Key,
+                  Name = normalizedSchema.Name,
+                  Description = normalizedSchema.Description,
+                  CatalogueKey = normalizedSchema.CatalogueKey,
+                  HeaderFields = catalogue!.HeaderFields,
+                  DetailFields = normalizedSchema.DetailFields,
+                  Permissions = normalizedSchema.Permissions,
+                  CreatedAtUtc = normalizedSchema.CreatedAtUtc,
+                  UpdatedAtUtc = normalizedSchema.UpdatedAtUtc
+              }
+            : normalizedSchema;
     }
 
     public async Task DeleteSchemaAsync(string datasetKey, UserContext user, CancellationToken cancellationToken)
@@ -74,6 +130,40 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
 
         await repository.DeleteSchemaAsync(key, cancellationToken);
         await AddAuditAsync(user, "SCHEMA_DELETE", key, null, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<Catalogue>> GetCataloguesAsync(CancellationToken cancellationToken)
+        => repository.GetCataloguesAsync(cancellationToken);
+
+    public async Task<Catalogue> UpsertCatalogueAsync(Catalogue catalogue, UserContext user, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(catalogue.Key))
+            throw new DatasetServiceException("Catalogue key is required.");
+        if (string.IsNullOrWhiteSpace(catalogue.Name))
+            throw new DatasetServiceException("Catalogue name is required.");
+
+        EnsureAuthorized(DatasetAuthorizer.CanManageCatalogues(user), "User is not authorized to manage catalogues.");
+
+        EnsureNoDuplicateFieldNames(catalogue.HeaderFields, "catalogue header");
+
+        var normalized = new Catalogue
+        {
+            Key = catalogue.Key.Trim().ToLowerInvariant(),
+            Name = catalogue.Name.Trim(),
+            Description = catalogue.Description,
+            HeaderFields = catalogue.HeaderFields,
+            CreatedAtUtc = catalogue.CreatedAtUtc,
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        await repository.UpsertCatalogueAsync(normalized, cancellationToken);
+        return normalized;
+    }
+
+    public async Task DeleteCatalogueAsync(string catalogueKey, UserContext user, CancellationToken cancellationToken)
+    {
+        EnsureAuthorized(DatasetAuthorizer.CanManageCatalogues(user), "User is not authorized to manage catalogues.");
+        await repository.DeleteCatalogueAsync(catalogueKey.Trim().ToLowerInvariant(), cancellationToken);
     }
 
     public async Task<IReadOnlyList<DatasetInstance>> GetInstancesAsync(
@@ -493,7 +583,7 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
 
             await repository.SaveInstanceAsync(instance, cancellationToken);
             var createRowChanges = BuildCreateAuditRowChanges(instance, schema);
-            await AddAuditAsync(user, "INSTANCE_CREATE", key, instance.Id, cancellationToken, createRowChanges);
+            await AddAuditAsync(user, "INSTANCE_CREATE", key, instance.Id, cancellationToken, createRowChanges, BuildAuditHeaderSnapshot(instance.Header), instance.AsOfDate, instance.State);
             return instance;
         }
         catch (DatasetServiceException ex)
@@ -583,7 +673,8 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
 
             await repository.ReplaceInstanceAsync(updated, cancellationToken, existing);
             var updateRowChanges = BuildUpdateAuditRowChanges(existing, updated, schema);
-            await AddAuditAsync(user, "INSTANCE_UPDATE", key, updated.Id, cancellationToken, updateRowChanges);
+            updateRowChanges.AddRange(BuildHeaderAuditRowChanges(existing, updated));
+            await AddAuditAsync(user, "INSTANCE_UPDATE", key, updated.Id, cancellationToken, updateRowChanges, BuildAuditHeaderSnapshot(updated.Header), updated.AsOfDate, updated.State);
             return updated;
         }
         catch (DatasetServiceException ex)
@@ -621,13 +712,19 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
         var schema = await GetSchemaOrThrowAsync(key, cancellationToken);
         EnsureAuthorized(DatasetAuthorizer.CanWrite(schema, user), "User is not authorized to delete dataset headers.");
 
+        var existing = await repository.GetInstanceAsync(key, instanceId, cancellationToken);
+        if (existing is null)
+        {
+            throw new DatasetServiceException("Dataset instance was not found.", DatasetServiceErrorCode.NotFound);
+        }
+
         var deleted = await repository.DeleteInstanceAsync(key, instanceId, cancellationToken);
         if (!deleted)
         {
             throw new DatasetServiceException("Dataset instance was not found.", DatasetServiceErrorCode.NotFound);
         }
 
-        await AddAuditAsync(user, "INSTANCE_DELETE", key, instanceId, cancellationToken);
+        await AddAuditAsync(user, "INSTANCE_DELETE", key, instanceId, cancellationToken, null, BuildAuditHeaderSnapshot(existing.Header), existing.AsOfDate, existing.State);
     }
 
     public async Task<DatasetInstance> SignoffInstanceAsync(SignoffDatasetRequest request, UserContext user, CancellationToken cancellationToken)
@@ -678,7 +775,7 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
             };
 
             await repository.ReplaceInstanceAsync(official, cancellationToken, existing);
-            await AddAuditAsync(user, InstanceSignoffAction, key, official.Id, cancellationToken);
+            await AddAuditAsync(user, InstanceSignoffAction, key, official.Id, cancellationToken, null, BuildAuditHeaderSnapshot(official.Header), official.AsOfDate, official.State);
             return official;
         }
         catch (DatasetServiceException ex)
@@ -703,7 +800,13 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
         }
     }
 
-    public async Task<IReadOnlyList<AuditEvent>> GetAuditAsync(UserContext user, CancellationToken cancellationToken, string? datasetKey = null, Guid? instanceId = null)
+    public async Task<IReadOnlyList<AuditEvent>> GetAuditAsync(
+        UserContext user,
+        CancellationToken cancellationToken,
+        string? datasetKey = null,
+        Guid? instanceId = null,
+        DateOnly? minOccurredDate = null,
+        DateOnly? maxOccurredDate = null)
     {
         var normalizedDatasetKey = string.IsNullOrWhiteSpace(datasetKey)
             ? null
@@ -722,14 +825,14 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
 
         if (user.HasRole(DatasetAuthorizer.DatasetAdminRole))
         {
-            return await repository.GetAuditEventsAsync(normalizedDatasetKey, cancellationToken);
+            return await repository.GetAuditEventsAsync(normalizedDatasetKey, cancellationToken, minOccurredDate, maxOccurredDate);
         }
 
         if (!string.IsNullOrWhiteSpace(normalizedDatasetKey))
         {
             var schema = await GetSchemaOrThrowAsync(normalizedDatasetKey, cancellationToken);
             EnsureAuthorized(DatasetAuthorizer.CanRead(schema, user), "User is not authorized to view audit logs for this dataset.");
-            return await repository.GetAuditEventsAsync(normalizedDatasetKey, cancellationToken);
+            return await repository.GetAuditEventsAsync(normalizedDatasetKey, cancellationToken, minOccurredDate, maxOccurredDate);
         }
 
         var readableKeys = (await repository.GetSchemasAsync(cancellationToken))
@@ -737,7 +840,7 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
             .Select(schema => NormalizeDatasetKey(schema.Key))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var allAudit = await repository.GetAuditEventsAsync(null, cancellationToken);
+        var allAudit = await repository.GetAuditEventsAsync(null, cancellationToken, minOccurredDate, maxOccurredDate);
         return allAudit
             .Where(entry => !string.IsNullOrWhiteSpace(entry.DatasetKey)
                 && readableKeys.Contains(NormalizeDatasetKey(entry.DatasetKey)))
@@ -756,7 +859,10 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
         string datasetKey,
         Guid? instanceId,
         CancellationToken cancellationToken,
-        IReadOnlyList<AuditRowChange>? rowChanges = null)
+        IReadOnlyList<AuditRowChange>? rowChanges = null,
+        IReadOnlyDictionary<string, string>? instanceHeader = null,
+        DateOnly? asOfDate = null,
+        string? state = null)
     {
         var normalizedUser = string.IsNullOrWhiteSpace(user.UserId) ? "unknown" : user.UserId.Trim();
         await repository.AddAuditEventAsync(new AuditEvent
@@ -767,8 +873,23 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
             Action = action,
             DatasetKey = datasetKey,
             DatasetInstanceId = instanceId,
+            AsOfDate = asOfDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            State = state,
+            InstanceHeader = instanceHeader ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
             RowChanges = rowChanges ?? new List<AuditRowChange>()
         }, cancellationToken);
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildAuditHeaderSnapshot(IDictionary<string, object?> header)
+    {
+        var snapshot = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var pair in header)
+        {
+            snapshot[pair.Key] = pair.Value?.ToString() ?? string.Empty;
+        }
+
+        return snapshot;
     }
 
     private async Task EnsureApproverDidNotModifyInstanceSinceLastSignoffAsync(
@@ -901,6 +1022,67 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
         }
 
         return rowChanges;
+    }
+
+    private static List<AuditRowChange> BuildHeaderAuditRowChanges(DatasetInstance existing, DatasetInstance updated)
+    {
+        var headerChanges = new List<AuditRowChange>();
+
+        if (!string.Equals(existing.AsOfDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), updated.AsOfDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.Ordinal))
+        {
+            headerChanges.Add(BuildSingleHeaderChange(
+                "As Of Date",
+                existing.AsOfDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                updated.AsOfDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+        }
+
+        if (!string.Equals(existing.State, updated.State, StringComparison.OrdinalIgnoreCase))
+        {
+            headerChanges.Add(BuildSingleHeaderChange("State", existing.State, updated.State));
+        }
+
+        var allHeaderKeys = existing.Header.Keys
+            .Concat(updated.Header.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var key in allHeaderKeys)
+        {
+            existing.Header.TryGetValue(key, out var beforeValueRaw);
+            updated.Header.TryGetValue(key, out var afterValueRaw);
+
+            var beforeValue = FormatValueForAudit(beforeValueRaw);
+            var afterValue = FormatValueForAudit(afterValueRaw);
+            if (string.Equals(beforeValue, afterValue, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            headerChanges.Add(BuildSingleHeaderChange(key, beforeValue, afterValue));
+        }
+
+        return headerChanges;
+    }
+
+    private static AuditRowChange BuildSingleHeaderChange(string fieldName, string beforeValue, string afterValue)
+    {
+        return new AuditRowChange
+        {
+            Operation = "updated",
+            KeyFields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Header Field"] = fieldName
+            },
+            SourceValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Value"] = beforeValue
+            },
+            TargetValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Value"] = afterValue
+            }
+        };
     }
 
     private static IReadOnlyList<string> GetDetailKeyFields(DatasetSchema schema)

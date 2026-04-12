@@ -23,6 +23,7 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
 
     // In-memory caches — all access is serialised by _semaphore so plain Dictionary is safe.
     private readonly Dictionary<string, DatasetSchema> _schemaCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Catalogue> _catalogueCache = new(StringComparer.OrdinalIgnoreCase);
     // Value is (parsed header, last-modified at read time).
     // DateTimeOffset.MaxValue is a sentinel meaning "written by this process — always fresh".
     private readonly Dictionary<string, (DatasetInstanceHeaderIndex Header, DateTimeOffset LastModified)> _headerIndexCache = new(StringComparer.Ordinal);
@@ -102,6 +103,75 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
             _schemaCache.Remove(datasetKey);
             foreach (var k in _headerIndexCache.Keys.Where(k => k.Contains($"/{normalizedKey}/", StringComparison.OrdinalIgnoreCase)).ToList())
                 _headerIndexCache.Remove(k);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    // ─── Catalogue operations ────────────────────────────────────────────────────
+
+    public async Task<IReadOnlyList<Catalogue>> GetCataloguesAsync(CancellationToken cancellationToken)
+    {
+        await _semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            var keys = await ListKeysByPrefixAsync(BuildKey("catalogues/"), cancellationToken);
+            var catalogues = new List<Catalogue>();
+            foreach (var key in keys.Where(k => k.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
+            {
+                var catalogue = await ReadJsonAsync<Catalogue?>(key, null, cancellationToken);
+                if (catalogue is not null && !string.IsNullOrWhiteSpace(catalogue.Key))
+                    catalogues.Add(catalogue);
+            }
+            return catalogues.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    public async Task<Catalogue?> GetCatalogueAsync(string catalogueKey, CancellationToken cancellationToken)
+    {
+        await _semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            if (_catalogueCache.TryGetValue(catalogueKey, out var cached))
+                return cached;
+            var catalogue = await ReadJsonAsync<Catalogue?>(GetCatalogueKey(catalogueKey), null, cancellationToken);
+            if (catalogue is not null)
+                _catalogueCache[catalogueKey] = catalogue;
+            return catalogue;
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    public async Task UpsertCatalogueAsync(Catalogue catalogue, CancellationToken cancellationToken)
+    {
+        await _semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            await WriteJsonAsync(GetCatalogueKey(catalogue.Key), catalogue, cancellationToken);
+            _catalogueCache[catalogue.Key] = catalogue;
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    public async Task DeleteCatalogueAsync(string catalogueKey, CancellationToken cancellationToken)
+    {
+        await _semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            await DeleteIfExistsAsync(GetCatalogueKey(catalogueKey), cancellationToken);
+            _catalogueCache.Remove(catalogueKey);
         }
         finally
         {
@@ -283,7 +353,11 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         }
     }
 
-    public async Task<IReadOnlyList<AuditEvent>> GetAuditEventsAsync(string? datasetKey, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<AuditEvent>> GetAuditEventsAsync(
+        string? datasetKey,
+        CancellationToken cancellationToken,
+        DateOnly? minOccurredDate = null,
+        DateOnly? maxOccurredDate = null)
     {
         await _semaphore.WaitAsync(cancellationToken);
         try
@@ -296,6 +370,11 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
 
             foreach (var key in auditKeys.Where(k => k.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
             {
+                if (!IsAuditKeyInOccurredDateRange(key, minOccurredDate, maxOccurredDate))
+                {
+                    continue;
+                }
+
                 var entry = await ReadJsonAsync<AuditEvent?>(key, null, cancellationToken);
                 if (entry is not null)
                 {
@@ -311,6 +390,38 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
         {
             _semaphore.Release();
         }
+    }
+
+    private static bool IsAuditKeyInOccurredDateRange(string key, DateOnly? minOccurredDate, DateOnly? maxOccurredDate)
+    {
+        if (!minOccurredDate.HasValue && !maxOccurredDate.HasValue)
+        {
+            return true;
+        }
+
+        var fileName = Path.GetFileName(key);
+        if (string.IsNullOrWhiteSpace(fileName) || fileName.Length < 8)
+        {
+            return true;
+        }
+
+        var dateToken = fileName[..8];
+        if (!DateOnly.TryParseExact(dateToken, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var occurredDate))
+        {
+            return true;
+        }
+
+        if (minOccurredDate.HasValue && occurredDate < minOccurredDate.Value)
+        {
+            return false;
+        }
+
+        if (maxOccurredDate.HasValue && occurredDate > maxOccurredDate.Value)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     public async Task<IReadOnlyList<AuditEvent>> GetInstanceAuditHistoryAsync(string datasetKey, Guid instanceId, CancellationToken cancellationToken)
@@ -970,6 +1081,9 @@ public class BlobDataRepository(IBlobStore blobStore, IOptions<StorageOptions> o
 
     private string GetSchemaKey(string datasetKey)
         => BuildKey($"schemas/{EncodeFileKey(datasetKey)}.json");
+
+    private string GetCatalogueKey(string catalogueKey)
+        => BuildKey($"catalogues/{EncodeFileKey(catalogueKey)}.json");
 
     private string GetAuditRootPrefix()
         => BuildKey("audit/");
