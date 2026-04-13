@@ -260,6 +260,7 @@ export class App {
   readonly instanceSortDir = signal<'asc' | 'desc'>('desc');
   readonly instanceFilterAsOfDate = signal('');
   readonly instanceFilterState = signal('');
+  readonly instanceFilterLastModifiedBy = signal('');
   readonly instanceFilterHeader = signal('');
   readonly savedHeaderDatePresets: SavedHeaderDatePreset[] = ['Last month', 'Last 3 months', 'Last 6 months', 'Last 1 year', 'Last 3 years', 'Last 5 years'];
   readonly instanceDatePreset = signal<SavedHeaderDatePreset>('Last month');
@@ -277,10 +278,12 @@ export class App {
     const dir = this.instanceSortDir();
     const fDate = this.instanceFilterAsOfDate().trim().toLowerCase();
     const fState = this.instanceFilterState().trim().toLowerCase();
+    const fLastModifiedBy = this.instanceFilterLastModifiedBy().trim().toLowerCase();
     const fHeader = this.instanceFilterHeader().trim().toLowerCase();
     let rows = [...this.datasetInstances()];
     if (fDate) rows = rows.filter((r) => r.asOfDate.toLowerCase().includes(fDate));
     if (fState) rows = rows.filter((r) => r.state.toLowerCase().includes(fState));
+    if (fLastModifiedBy) rows = rows.filter((r) => (r.lastModifiedBy ?? '').toLowerCase().includes(fLastModifiedBy));
     if (fHeader) rows = rows.filter((r) =>
       Object.entries(r.header).some(([k, v]) =>
         `${k}: ${v}`.toLowerCase().includes(fHeader)));
@@ -304,6 +307,7 @@ export class App {
     this.instanceFilterAsOfDateMin().trim().length > 0 ||
     this.instanceFilterAsOfDateMax().trim().length > 0 ||
     this.instanceFilterState().trim().length > 0 ||
+    this.instanceFilterLastModifiedBy().trim().length > 0 ||
     this.instanceFilterHeader().trim().length > 0);
   readonly hasAuditFilters = computed(() =>
     this.auditOccurredDateMin().trim().length > 0 ||
@@ -2803,6 +2807,7 @@ export class App {
     this.instanceFilterAsOfDateMin.set('');
     this.instanceFilterAsOfDateMax.set('');
     this.instanceFilterState.set('');
+    this.instanceFilterLastModifiedBy.set('');
     this.instanceFilterHeader.set('');
     this.loadDatasetInstances();
   }
@@ -3172,6 +3177,10 @@ export class App {
     }
 
     return '';
+  }
+
+  stateBadgeClass(state: string): string {
+    return 'state-badge--' + state.toLowerCase().replace(/\s+/g, '-');
   }
 
   formatDateTimeLong(value: string | Date | null | undefined): string {

@@ -194,6 +194,8 @@
                         <option value="Lookup">Lookup</option>
                       </select>
                     </label>
+                  </div>
+                  <div class="schema-field-limits-row">
                     <label class="schema-field-input">
                       <span class="schema-field-label">Default Value</span>
                       @if (field.type === 'Boolean') {
@@ -217,8 +219,6 @@
                         <input type="text" [ngModel]="getFieldDefaultValueText(field)" (ngModelChange)="updateCatalogueTemplateField($index, 'defaultValue', $event)" />
                       }
                     </label>
-                  </div>
-                  <div class="schema-field-limits-row">
                     @if (field.type === 'Select') {
                     <label class="schema-field-input schema-select-full schema-type-extra">
                       <span class="schema-field-label">Allowed Values (csv)</span>
@@ -372,7 +372,17 @@
                   <th></th>
                   <th></th>
                   <th></th>
-                  <th></th>
+                  <th>
+                    <div class="col-filter-wrap" (click)="$event.stopPropagation()">
+                      <input class="col-filter" type="text" placeholder="Filter…"
+                        [ngModel]="instanceFilterLastModifiedBy()"
+                        (ngModelChange)="instanceFilterLastModifiedBy.set($event)"
+                        (click)="$event.stopPropagation()" />
+                      @if (instanceFilterLastModifiedBy()) {
+                        <button type="button" class="col-filter-clear" title="Clear filter" (click)="instanceFilterLastModifiedBy.set('')">✕</button>
+                      }
+                    </div>
+                  </th>
                   <th>
                     <div class="col-filter-wrap" (click)="$event.stopPropagation()">
                       <input class="col-filter" type="text" placeholder="Filter…"
@@ -391,11 +401,11 @@
                 @for (instance of sortedInstances(); track instance.id) {
                   <tr [class.active-instance-row]="selectedInstanceId() === instance.id" (click)="loadInstanceIntoEditor(instance)">
                     <td>{{ instance.asOfDate }}</td>
-                    <td>{{ instance.state }}</td>
+                    <td><span class="state-badge" [ngClass]="stateBadgeClass(instance.state)">{{ instance.state }}</span></td>
                     <td>v{{ instance.version }}</td>
                     <td>{{ formatDateTimeLong(instance.createdAtUtc) }}</td>
                     <td>{{ formatDateTimeLong(instance.lastModifiedAtUtc) }}</td>
-                    <td>{{ instance.lastModifiedBy }}</td>
+                    <td>@if (instance.lastModifiedBy) {<span class="pill audit-user-pill">👤 {{ instance.lastModifiedBy }}</span>}</td>
                     <td>
                       @for (entry of instance.header | keyvalue; track entry.key) {
                         <span class="header-chip">{{ entry.key }}: {{ entry.value }}</span>
@@ -637,6 +647,8 @@
                           <option value="Lookup">Lookup</option>
                         </select>
                       </label>
+                    </div>
+                    <div class="schema-field-limits-row">
                       <label class="schema-field-input">
                         <span class="schema-field-label">Default Value</span>
                         @if (field.type === 'Boolean') {
@@ -660,8 +672,6 @@
                           <input type="text" [ngModel]="getFieldDefaultValueText(field)" (ngModelChange)="updateSchemaField('detailFields', $index, 'defaultValue', $event)" />
                         }
                       </label>
-                    </div>
-                    <div class="schema-field-limits-row">
                       @if (field.type === 'Select') {
                       <label class="schema-field-input schema-select-full schema-type-extra">
                         <span class="schema-field-label">Allowed Values (csv)</span>
