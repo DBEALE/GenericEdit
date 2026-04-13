@@ -103,7 +103,8 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
         };
 
         await repository.UpsertSchemaAsync(normalizedSchema, cancellationToken);
-        await AddAuditAsync(user, "SCHEMA_UPSERT", normalizedSchema.Key, null, cancellationToken);
+        var schemaUpsertChanges = BuildSchemaUpsertAuditChanges(existingSchema, normalizedSchema);
+        await AddAuditAsync(user, "SCHEMA_UPSERT", normalizedSchema.Key, null, cancellationToken, schemaUpsertChanges);
 
         // Return with template fields injected so the caller sees the effective schema
         return hasTemplate
@@ -129,7 +130,8 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
         EnsureAuthorized(DatasetAuthorizer.CanMaintainSchema(schema, user), "User is not authorized to maintain this dataset schema.");
 
         await repository.DeleteSchemaAsync(key, cancellationToken);
-        await AddAuditAsync(user, "SCHEMA_DELETE", key, null, cancellationToken);
+        var schemaDeleteChanges = BuildSchemaDeleteAuditChanges(schema);
+        await AddAuditAsync(user, "SCHEMA_DELETE", key, null, cancellationToken, schemaDeleteChanges);
     }
 
     public Task<IReadOnlyList<Catalogue>> GetCataloguesAsync(CancellationToken cancellationToken)
@@ -939,6 +941,167 @@ public sealed class DatasetService(IDataRepository repository, LookupValueCache 
 
 
 
+
+    private static List<AuditRowChange> BuildSchemaUpsertAuditChanges(DatasetSchema? existing, DatasetSchema updated)
+    {
+        var changes = new List<AuditRowChange>();
+
+        if (existing is null)
+        {
+            changes.Add(new AuditRowChange
+            {
+                Operation = "added",
+                KeyFields = new Dictionary<string, string> { ["Category"] = "Metadata", ["Name"] = "Schema" },
+                TargetValues = new Dictionary<string, string>
+                {
+                    ["Display Name"] = updated.Name,
+                    ["Description"] = updated.Description,
+                    ["Catalogue"] = updated.CatalogueKey ?? "(none)",
+                }
+            });
+        }
+        else
+        {
+            if (existing.Name != updated.Name)
+                changes.Add(MakeSchemaPropertyChange("Metadata", "Name", existing.Name, updated.Name));
+            if (existing.Description != updated.Description)
+                changes.Add(MakeSchemaPropertyChange("Metadata", "Description", existing.Description, updated.Description));
+            if (!string.Equals(existing.CatalogueKey, updated.CatalogueKey, StringComparison.OrdinalIgnoreCase))
+                changes.Add(MakeSchemaPropertyChange("Metadata", "Catalogue", existing.CatalogueKey ?? "(none)", updated.CatalogueKey ?? "(none)"));
+
+            changes.AddRange(BuildSchemaPermissionChanges(existing.Permissions, updated.Permissions));
+            changes.AddRange(BuildSchemaFieldChanges("Header Field", existing.HeaderFields, updated.HeaderFields));
+            changes.AddRange(BuildSchemaFieldChanges("Detail Field", existing.DetailFields, updated.DetailFields));
+        }
+
+        return changes;
+    }
+
+    private static List<AuditRowChange> BuildSchemaDeleteAuditChanges(DatasetSchema schema)
+    {
+        var changes = new List<AuditRowChange>
+        {
+            new()
+            {
+                Operation = "removed",
+                KeyFields = new Dictionary<string, string> { ["Category"] = "Metadata", ["Name"] = "Schema" },
+                SourceValues = new Dictionary<string, string>
+                {
+                    ["Display Name"] = schema.Name,
+                    ["Description"] = schema.Description,
+                    ["Catalogue"] = schema.CatalogueKey ?? "(none)",
+                }
+            }
+        };
+
+        foreach (var field in schema.HeaderFields)
+        {
+            changes.Add(new AuditRowChange
+            {
+                Operation = "removed",
+                KeyFields = new Dictionary<string, string> { ["Category"] = "Header Field", ["Name"] = field.Name },
+                SourceValues = SchemaFieldToAuditMap(field)
+            });
+        }
+
+        foreach (var field in schema.DetailFields)
+        {
+            changes.Add(new AuditRowChange
+            {
+                Operation = "removed",
+                KeyFields = new Dictionary<string, string> { ["Category"] = "Detail Field", ["Name"] = field.Name },
+                SourceValues = SchemaFieldToAuditMap(field)
+            });
+        }
+
+        return changes;
+    }
+
+    private static AuditRowChange MakeSchemaPropertyChange(string category, string name, string before, string after) =>
+        new()
+        {
+            Operation = "updated",
+            KeyFields = new Dictionary<string, string> { ["Category"] = category, ["Name"] = name },
+            SourceValues = new Dictionary<string, string> { ["Value"] = before },
+            TargetValues = new Dictionary<string, string> { ["Value"] = after }
+        };
+
+    private static List<AuditRowChange> BuildSchemaPermissionChanges(DatasetPermissions existing, DatasetPermissions updated)
+    {
+        var changes = new List<AuditRowChange>();
+
+        void AddIfChanged(string name, HashSet<string> before, HashSet<string> after)
+        {
+            if (!before.SetEquals(after))
+            {
+                changes.Add(MakeSchemaPropertyChange("Permissions", name,
+                    before.Count > 0 ? string.Join(", ", before.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) : "(none)",
+                    after.Count > 0 ? string.Join(", ", after.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) : "(none)"));
+            }
+        }
+
+        AddIfChanged("Read Roles", existing.ReadRoles, updated.ReadRoles);
+        AddIfChanged("Write Roles", existing.WriteRoles, updated.WriteRoles);
+        AddIfChanged("Signoff Roles", existing.SignoffRoles, updated.SignoffRoles);
+        AddIfChanged("Admin Roles", existing.DatasetAdminRoles, updated.DatasetAdminRoles);
+
+        return changes;
+    }
+
+    private static List<AuditRowChange> BuildSchemaFieldChanges(string category, IReadOnlyList<SchemaField> existingFields, IReadOnlyList<SchemaField> updatedFields)
+    {
+        var changes = new List<AuditRowChange>();
+        var existingByName = existingFields.ToDictionary(f => f.Name, f => f, StringComparer.OrdinalIgnoreCase);
+        var updatedByName = updatedFields.ToDictionary(f => f.Name, f => f, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var field in updatedFields)
+        {
+            var keyFields = new Dictionary<string, string> { ["Category"] = category, ["Name"] = field.Name };
+            if (!existingByName.TryGetValue(field.Name, out var existingField))
+            {
+                changes.Add(new AuditRowChange { Operation = "added", KeyFields = keyFields, TargetValues = SchemaFieldToAuditMap(field) });
+            }
+            else
+            {
+                var before = SchemaFieldToAuditMap(existingField);
+                var after = SchemaFieldToAuditMap(field);
+                if (!before.SequenceEqual(after))
+                {
+                    changes.Add(new AuditRowChange { Operation = "updated", KeyFields = keyFields, SourceValues = before, TargetValues = after });
+                }
+            }
+        }
+
+        foreach (var field in existingFields.Where(f => !updatedByName.ContainsKey(f.Name)))
+        {
+            changes.Add(new AuditRowChange
+            {
+                Operation = "removed",
+                KeyFields = new Dictionary<string, string> { ["Category"] = category, ["Name"] = field.Name },
+                SourceValues = SchemaFieldToAuditMap(field)
+            });
+        }
+
+        return changes;
+    }
+
+    private static Dictionary<string, string> SchemaFieldToAuditMap(SchemaField field)
+    {
+        var map = new Dictionary<string, string>
+        {
+            ["Label"] = field.Label,
+            ["Type"] = field.Type.ToString(),
+        };
+        if (field.IsKey) map["Key"] = "true";
+        if (field.Required) map["Required"] = "true";
+        if (!string.IsNullOrEmpty(field.DefaultValue)) map["Default"] = field.DefaultValue;
+        if (field.MaxLength.HasValue) map["Max Length"] = field.MaxLength.Value.ToString(CultureInfo.InvariantCulture);
+        if (field.MinValue.HasValue) map["Min"] = field.MinValue.Value.ToString(CultureInfo.InvariantCulture);
+        if (field.MaxValue.HasValue) map["Max"] = field.MaxValue.Value.ToString(CultureInfo.InvariantCulture);
+        if (field.AllowedValues.Count > 0) map["Allowed Values"] = string.Join(", ", field.AllowedValues);
+        if (!string.IsNullOrEmpty(field.LookupDatasetKey)) map["Lookup Dataset"] = field.LookupDatasetKey;
+        return map;
+    }
 
     private static List<AuditRowChange> BuildCreateAuditRowChanges(DatasetInstance instance, DatasetSchema schema)
     {
